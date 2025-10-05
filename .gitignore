@@ -1,0 +1,55 @@
+# Node.js
+node_modules/
+package-lock.json
+yarn.lock
+
+# Python
+*.pyc
+__pycache__/
+.venv/
+venv/
+
+# Build
+build/
+dist/
+.next/
+
+# Environment
+.env
+.env.local
+
+# Database
+*.db
+*.sqlite
+chroma_db/
+postgresql.sql
+
+# AI Models (용량 큰 파일들)
+*.pth
+*.pt
+*.ckpt
+*.exe
+yolo11n-pose.pt
+fashion_*.pth
+
+# User uploaded/processed images (업로드된 이미지만 무시)
+uploaded_images/
+processed_images/
+temp/
+cache/
+
+# Project-specific (프로젝트 파일은 팀원들과 공유 필요하면 주석 처리)
+# project/
+
+# IDE
+.vscode/
+.idea/
+.DS_Store
+
+# Logs
+*.log
+npm-debug.log*
+
+# Python cache
+.pytest_cache/
+.mypy_cache/
