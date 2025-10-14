@@ -6,6 +6,8 @@ AI 기반 가상 옷장 및 패션 추천 서비스
 
 꼬까옷은 사용자의 옷장을 디지털화하고, AI(LLM/YOLO/SAM2/DNN)를 활용하여 스타일 추천 및 코디 제안을 제공하는 가상 옷장 애플리케이션입니다.
 
+[대용량 데이터 다운로드 (Google Drive 폴더)](https://drive.google.com/drive/folders/1NunAF1a3_fgePWbFsZ_4mUStBeRh_SvF?usp=sharing) :contentReference[oaicite:0]{index=0}
+
 ## 🎯 주요 기능
 
 - **가상 옷장 관리**: 사용자의 의류를 촬영하여 디지털 옷장으로 관리
