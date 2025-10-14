@@ -8,6 +8,9 @@ AI 기반 가상 옷장 및 패션 추천 서비스
 
 [대용량 데이터 다운로드 (Google Drive 폴더)](https://drive.google.com/drive/folders/1NunAF1a3_fgePWbFsZ_4mUStBeRh_SvF?usp=sharing) :contentReference[oaicite:0]{index=0}
 
+## 🗂️ 사전 숙지
+[./BRANCH_GUIDE.md] 를 먼저 읽어보세요!
+
 ## 🎯 주요 기능
 
 - **가상 옷장 관리**: 사용자의 의류를 촬영하여 디지털 옷장으로 관리
