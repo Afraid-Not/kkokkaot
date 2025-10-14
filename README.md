@@ -8,8 +8,10 @@ AI 기반 가상 옷장 및 패션 추천 서비스
 
 [대용량 데이터 다운로드 (Google Drive 폴더)](https://drive.google.com/drive/folders/1NunAF1a3_fgePWbFsZ_4mUStBeRh_SvF?usp=sharing) :contentReference[oaicite:0]{index=0}
 
-## 🗂️ 사전 숙지
-[./BRANCH_GUIDE.md] 를 먼저 읽어보세요!
+## 📚 문서 - 사전 숙지 필수
+
+- **[브랜치 사용 가이드](./BRANCH_GUIDE.md)** - Git 브랜치 전략 및 커밋 규칙
+- **[필수 라이브러리](./kkokkaot_req.md)** - requirements.txt
 
 ## 🎯 주요 기능
 
