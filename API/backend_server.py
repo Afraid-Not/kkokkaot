@@ -638,16 +638,22 @@ def get_similar_recommendations(
         
         # 4. 사용자 아이템 우선, 부족하면 기본 아이템 추가
         recommendations = user_recs[:n_results]
-        
+
         if len(recommendations) < n_results:
             needed = n_results - len(recommendations)
             recommendations.extend(default_recs[:needed])
-        
+
         print(f"✅ AI 추천 완료: {len(recommendations)}개 아이템")
         print(f"  - 사용자 아이템: {len(user_recs)}개")
         print(f"  - 기본 아이템: {len(default_recs)}개")
+
+        # ✅ 디버깅: 실제 응답 데이터 출력 (추가!)
+        print(f"\n📦 응답 데이터:")
+        for rec in recommendations:
+            print(f"  - id: {rec['id']}, image_path: {rec['image_path']}")
+
         print(f"{'='*60}\n")
-        
+
         return {
             "success": True,
             "recommendations": recommendations,
