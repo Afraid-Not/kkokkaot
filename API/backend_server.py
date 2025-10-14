@@ -12,13 +12,51 @@ import psycopg2
 from psycopg2.extras import Json
 from fastapi.responses import FileResponse
 import os
+from contextlib import asynccontextmanager
 
 # AI 파이프라인 import
 sys.path.append(str(Path(__file__).parent))
 from _main_pipeline import FashionPipeline
 
+# ✅ 전역 변수를 먼저 선언
+pipeline = None
+
+# ✅ lifespan 함수
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    global pipeline
+    
+    print("\n🤖 AI 파이프라인 초기화 중...")
+    try:
+        pipeline = FashionPipeline(
+            yolo_pose_path="D:/kkokkaot/API/pre_trained_weights/yolo11n-pose.pt",
+            top_model_path="D:/kkokkaot/API/pre_trained_weights/fashion_top_model.pth",
+            bottom_model_path="D:/kkokkaot/API/pre_trained_weights/fashion_bottom_model.pth",
+            chroma_path="D:/kkokkaot/API/chroma_db",
+            db_config={
+                'host': 'localhost',
+                'port': 5432,
+                'database': 'kkokkaot_closet',
+                'user': 'postgres',
+                'password': '000000'
+            }
+        )
+        print("✅ AI 파이프라인 초기화 완료!\n")
+    except Exception as e:
+        print(f"⚠️ AI 파이프라인 초기화 실패: {e}")
+        print("⚠️ 이미지 업로드만 가능하고 AI 분석은 비활성화됩니다.\n")
+        pipeline = None
+    
+    yield  # 서버 실행
+    
+    # Shutdown
+    if pipeline:
+        pipeline.close()
+        print("PostgreSQL 연결 종료")
+
 # FastAPI 앱 생성
-app = FastAPI(title="꼬까옷 백엔드 서버")
+app = FastAPI(title="꼬까옷 백엔드 서버", lifespan=lifespan)
 
 # CORS 설정
 app.add_middleware(
@@ -28,28 +66,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# AI 파이프라인 초기화
-print("\n🤖 AI 파이프라인 초기화 중...")
-try:
-    pipeline = FashionPipeline(
-        yolo_pose_path="yolo11n-pose.pt",
-        top_model_path="fashion_top_model.pth",
-        bottom_model_path="fashion_bottom_model.pth",
-        chroma_path="./chroma_db",
-        db_config={
-            'host': 'localhost',
-            'port': 5432,
-            'database': 'kkokkaot_closet',
-            'user': 'postgres',
-            'password': '000000'
-        }
-    )
-    print("✅ AI 파이프라인 초기화 완료!\n")
-except Exception as e:
-    print(f"⚠️ AI 파이프라인 초기화 실패: {e}")
-    print("⚠️ 이미지 업로드만 가능하고 AI 분석은 비활성화됩니다.\n")
-    pipeline = None
 
 # 회원가입 요청 데이터 형식
 class SignupRequest(BaseModel):
@@ -366,12 +382,10 @@ def delete_wardrobe_item(item_id: int):
         print(f"{'='*60}\n")
         raise HTTPException(status_code=500, detail=f"삭제 중 서버 오류: {str(e)}")
 
-
-# 옷장 조회 API
-
+# ✅ 옷장 조회 API 수정 (기본 아이템 포함)
 @app.get("/api/wardrobe/{user_id}")
-def get_wardrobe(user_id: int):
-    """사용자 옷장 아이템 목록 조회"""
+def get_wardrobe(user_id: int, include_defaults: bool = True):
+    """사용자 옷장 아이템 목록 조회 (기본 아이템 포함 옵션)"""
     
     print(f"\n{'='*60}")
     print(f"👔 옷장 조회 요청 (user_id: {user_id})")
@@ -386,6 +400,7 @@ def get_wardrobe(user_id: int):
     
     try:
         with pipeline.db_conn.cursor() as cur:
+            # 1. 사용자 자신의 아이템 조회
             cur.execute("""
                 SELECT 
                     w.item_id,
@@ -393,6 +408,7 @@ def get_wardrobe(user_id: int):
                     w.upload_date,
                     w.has_top,
                     w.has_bottom,
+                    w.is_default,
                     t.category as top_category,
                     t.color as top_color,
                     t.fit as top_fit,
@@ -404,16 +420,50 @@ def get_wardrobe(user_id: int):
                 LEFT JOIN bottom_attributes b ON w.item_id = b.item_id
                 WHERE w.user_id = %s
                 ORDER BY w.upload_date DESC
-                LIMIT 50
             """, (user_id,))
             
-            rows = cur.fetchall()
+            user_items = cur.fetchall()
+            
+            # 2. 사용자 아이템이 없으면 기본 아이템 포함
+            if len(user_items) == 0 and include_defaults:
+                print(f"  ⚠️  사용자 아이템 없음 → 기본 아이템 로드")
+                
+                cur.execute("""
+                    SELECT 
+                        w.item_id,
+                        w.original_image_path,
+                        w.upload_date,
+                        w.has_top,
+                        w.has_bottom,
+                        w.is_default,
+                        t.category as top_category,
+                        t.color as top_color,
+                        t.fit as top_fit,
+                        b.category as bottom_category,
+                        b.color as bottom_color,
+                        b.fit as bottom_fit
+                    FROM wardrobe_items w
+                    LEFT JOIN top_attributes t ON w.item_id = t.item_id
+                    LEFT JOIN bottom_attributes b ON w.item_id = b.item_id
+                    WHERE w.user_id = 0 AND w.is_default = TRUE
+                    ORDER BY w.style, w.item_id
+                    LIMIT 20
+                """)
+                
+                default_items = cur.fetchall()
+                rows = default_items
+            else:
+                rows = user_items
             
             items = []
             for row in rows:
                 item_id = row[0]
+                image_path = row[1]  # 예: "default_items\\101.jpg"
                 
-                # ✅ 분리된 이미지 경로 생성
+                # ✅ 파일명만 추출 (경로 제거)
+                filename = Path(image_path).name  # "101.jpg"
+                
+                # 분리된 이미지 경로 생성
                 top_image = None
                 bottom_image = None
                 
@@ -429,18 +479,19 @@ def get_wardrobe(user_id: int):
                 
                 item = {
                     'id': row[0],
-                    'image_path': row[1],
+                    'image_path': filename,  # ✅ 파일명만 반환 ("101.jpg")
                     'upload_date': row[2].isoformat() if row[2] else None,
                     'has_top': row[3],
                     'has_bottom': row[4],
-                    'top_category': row[5],
-                    'top_color': row[6],
-                    'top_fit': row[7],
-                    'bottom_category': row[8],
-                    'bottom_color': row[9],
-                    'bottom_fit': row[10],
-                    'top_image': top_image,      # ✅ 추가!
-                    'bottom_image': bottom_image  # ✅ 추가!
+                    'is_default': row[5],
+                    'top_category': row[6],
+                    'top_color': row[7],
+                    'top_fit': row[8],
+                    'bottom_category': row[9],
+                    'bottom_color': row[10],
+                    'bottom_fit': row[11],
+                    'top_image': top_image,
+                    'bottom_image': bottom_image
                 }
                 items.append(item)
             
@@ -450,7 +501,8 @@ def get_wardrobe(user_id: int):
             return {
                 'success': True,
                 'items': items,
-                'total': len(items)
+                'total': len(items),
+                'has_user_items': len(user_items) > 0
             }
             
     except Exception as e:
@@ -466,61 +518,81 @@ def get_wardrobe(user_id: int):
 # 이미지 제공 API
 @app.get("/api/images/{filename}")
 def get_image(filename: str):
-    """업로드된 이미지 파일 제공"""
+    """업로드된 이미지 또는 기본 아이템 이미지 파일 제공"""
     
-    # Path 객체를 사용해 운영체제 독립적인 경로 생성
-    file_path = UPLOAD_DIR / filename 
-    
-    # 실제 파일 시스템 경로를 문자열로 변환하여 os.path.exists 확인
+    # 1. uploaded_images 폴더에서 찾기
+    file_path = UPLOAD_DIR / filename
     if os.path.exists(str(file_path)):
-        return FileResponse(str(file_path)) # FileResponse에는 문자열 경로 전달
-    else:
-        # 로그 추가: 파일 경로 문제 디버깅을 위해
-        print(f"❌ 이미지 파일을 찾을 수 없습니다: {file_path}")
-        raise HTTPException(status_code=404, detail="Image not found")
+        return FileResponse(str(file_path))
+    
+    # 2. default_items 폴더에서 찾기 (✅ 추가!)
+    default_path = Path("./default_items") / filename
+    if os.path.exists(str(default_path)):
+        return FileResponse(str(default_path))
+    
+    # 3. 둘 다 없으면 404
+    print(f"❌ 이미지 파일을 찾을 수 없습니다: {filename}")
+    print(f"   - uploaded_images: {file_path}")
+    print(f"   - default_items: {default_path}")
+    raise HTTPException(status_code=404, detail="Image not found")
 
-# ✅ AI 추천 API (추가)
 @app.get("/api/recommendations/similar/{item_id}")
-def get_similar_recommendations(item_id: int, n_results: int = 3):
-    """지정된 아이템과 유사한 아이템을 추천 (ChromaDB 벡터 검색)"""
+def get_similar_recommendations(
+    item_id: int, 
+    n_results: int = 3,
+    user_id: int = None
+):
+    """유사 아이템 추천 (사용자 옷장 우선, 없으면 기본 아이템 포함)"""
     
     print(f"\n{'='*60}")
     print(f"🤖 AI 추천 요청 (기준 아이템 ID: {item_id})")
     print(f"  - 추천 개수: {n_results}")
+    print(f"  - 사용자 ID: {user_id}")
     print(f"{'='*60}")
     
     if not pipeline or not pipeline.chroma_collection:
         print("❌ AI 파이프라인 또는 ChromaDB 비활성화")
-        raise HTTPException(status_code=503, detail="AI 추천 기능을 사용할 수 없습니다.")
+        raise HTTPException(
+            status_code=503, 
+            detail="AI 추천 기능을 사용할 수 없습니다."
+        )
     
     try:
-        # 1. 기준 아이템의 이미지 경로를 가져옴
+        # 1. 기준 아이템의 이미지 경로 가져오기
         with pipeline.db_conn.cursor() as cur:
-            cur.execute("SELECT original_image_path FROM wardrobe_items WHERE item_id = %s", (item_id,))
+            cur.execute(
+                "SELECT original_image_path, user_id FROM wardrobe_items WHERE item_id = %s", 
+                (item_id,)
+            )
             row = cur.fetchone()
             if not row:
-                raise HTTPException(status_code=404, detail="기준 아이템을 찾을 수 없습니다.")
+                raise HTTPException(
+                    status_code=404, 
+                    detail="기준 아이템을 찾을 수 없습니다."
+                )
             base_item_image_path = row[0]
-            
-        # 2. 파이프라인의 유사 아이템 검색 함수 호출
-        #    이 함수는 내부적으로 이미지 임베딩 후 ChromaDB 검색을 수행해야 함
+            base_item_user_id = row[1]
+        
+        # 2. 유사 아이템 검색
         results = pipeline.get_similar_items(
             image_path=base_item_image_path,
-            n_results=n_results + 1 # 자기 자신 포함하여 검색 후 제외
+            n_results=n_results * 3
         )
         
-        # 3. 결과에서 자기 자신 제외
-        filtered_results = [
-            r for r in results if r['item_id'] != item_id
-        ]
+        # 3. 우선순위 필터링
+        user_recs = []
+        default_recs = []
         
-        # 4. 각 결과에 대한 세부 정보 조회 (카테고리, 색상 등)
-        recommendations = []
-        for rec in filtered_results:
+        for rec in results:
+            if rec['item_id'] == item_id:
+                continue
+            
             with pipeline.db_conn.cursor() as cur:
                 cur.execute("""
                     SELECT 
+                        w.user_id,
                         w.original_image_path,
+                        w.is_default,
                         t.category as top_category,
                         t.color as top_color,
                         b.category as bottom_category,
@@ -532,27 +604,48 @@ def get_similar_recommendations(item_id: int, n_results: int = 3):
                 """, (rec['item_id'],))
                 
                 details = cur.fetchone()
-                if details:
-                    image_path, top_cat, top_color, bottom_cat, bottom_color = details
-                    
-                    # 아이템 이름 생성
-                    name = ''
-                    if top_cat:
-                        name = f"{top_color or ''} {top_cat}".strip()
-                    elif bottom_cat:
-                        name = f"{bottom_color or ''} {bottom_cat}".strip()
-                    
-                    category = top_cat if top_cat else bottom_cat
-                    
-                    recommendations.append({
-                        'id': rec['item_id'],
-                        'image_path': image_path,
-                        'distance': rec['distance'],
-                        'name': name,
-                        'category': category,
-                    })
-
+                if not details:
+                    continue
+                
+                rec_user_id, image_path, is_default, top_cat, top_color, bottom_cat, bottom_color = details
+                
+                # ✅ 파일명만 추출 (추가!)
+                filename = Path(image_path).name
+                
+                # 아이템 이름 생성
+                name = ''
+                if top_cat:
+                    name = f"{top_color or ''} {top_cat}".strip()
+                elif bottom_cat:
+                    name = f"{bottom_color or ''} {bottom_cat}".strip()
+                
+                category = top_cat if top_cat else bottom_cat
+                
+                rec_data = {
+                    'id': rec['item_id'],
+                    'image_path': filename,  # ✅ 파일명만 반환
+                    'distance': rec['distance'],
+                    'name': name,
+                    'category': category,
+                    'is_default': is_default,
+                }
+                
+                # 우선순위 분류
+                if user_id and rec_user_id == user_id:
+                    user_recs.append(rec_data)
+                elif rec_user_id == 0:
+                    default_recs.append(rec_data)
+        
+        # 4. 사용자 아이템 우선, 부족하면 기본 아이템 추가
+        recommendations = user_recs[:n_results]
+        
+        if len(recommendations) < n_results:
+            needed = n_results - len(recommendations)
+            recommendations.extend(default_recs[:needed])
+        
         print(f"✅ AI 추천 완료: {len(recommendations)}개 아이템")
+        print(f"  - 사용자 아이템: {len(user_recs)}개")
+        print(f"  - 기본 아이템: {len(default_recs)}개")
         print(f"{'='*60}\n")
         
         return {
@@ -566,7 +659,11 @@ def get_similar_recommendations(item_id: int, n_results: int = 3):
         print(f"❌ AI 추천 중 오류 발생: {e}")
         import traceback
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"AI 추천 오류: {str(e)}")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"AI 추천 오류: {str(e)}"
+        )
+        
 
 @app.get("/api/wardrobe/item/{item_id}")
 def get_item_detail(item_id: int):
@@ -689,7 +786,6 @@ def get_item_detail(item_id: int):
             'message': str(e)
         }
 
-
 # ✅ 분리된 이미지 제공 API (새로 추가)
 @app.get("/api/processed-images/{filename}")
 def get_processed_image(filename: str):
@@ -707,7 +803,7 @@ def get_processed_image(filename: str):
 if __name__ == "__main__":
     uvicorn.run(
         "backend_server:app",
-        host="127.0.0.1", # 👈 이 부분을 127.0.0.1로 수정
+        host="127.0.0.1",
         port=4000,
-        reload=True
+        reload=False
     )

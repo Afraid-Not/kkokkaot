@@ -47,6 +47,7 @@ type Rec = {
   items: string[];
   score: number;
   reason: string;
+  is_default?: boolean;  // ✅ 추가
 };
 
 // 옷장 아이템 타입 (WardrobeManagement.tsx에서 복사)
@@ -181,53 +182,64 @@ export default function DailyOutfitRecommendation({
   // ✨ AI 추천 요청
   const fetchRecommendation = async () => {
     if (!baseItem) {
-        Alert.alert('알림', '추천 기준이 될 아이템을 먼저 선택해주세요.');
-        return;
+      Alert.alert('알림', '추천 기준이 될 아이템을 먼저 선택해주세요.');
+      return;
     }
     
     setRecommending(true);
     const itemToRecommend = baseItem;
 
     try {
-        const url = `${API_BASE_URL}/api/recommendations/similar/${itemToRecommend.id}?n_results=3`;
-        console.log(`\n✨ 추천 요청 URL: ${url}`);
-        
-        const response = await fetch(url);
-        
-        // ✅ [방어 로직 2] 200이 아니거나 JSON이 아니면 오류 처리
-        const contentType = response.headers.get('content-type');
-        if (response.status !== 200 || !contentType || !contentType.includes('application/json')) {
-            console.error(`❌ 추천 요청 실패: 상태 코드 ${response.status}`);
-            const errorText = await response.text();
-            console.error('서버 응답:', errorText.substring(0, 500));
-            Alert.alert('서버 오류', `추천을 받을 수 없습니다 (Status: ${response.status})`);
-            setRecommendations([]);
-            return;
-        }
+      const url = `${API_BASE_URL}/api/recommendations/similar/${itemToRecommend.id}?n_results=3&user_id=${userId}`;
+      console.log(`\n✨ 추천 요청 URL: ${url}`);
+      
+      const response = await fetch(url);
+      
+      // ✅ [방어 로직 2] 200이 아니거나 JSON이 아니면 오류 처리
+      const contentType = response.headers.get('content-type');
+      if (response.status !== 200 || !contentType || !contentType.includes('application/json')) {
+        console.error(`❌ 추천 요청 실패: 상태 코드 ${response.status}`);
+        const errorText = await response.text();
+        console.error('서버 응답:', errorText.substring(0, 500));
+        Alert.alert('서버 오류', `추천을 받을 수 없습니다 (Status: ${response.status})`);
+        setRecommendations([]);
+        return;
+      }
 
-        const data = await response.json();
+      const data = await response.json();
 
-        if (data.success && data.recommendations) {
-            const recs: Rec[] = data.recommendations.map((rec: any, index: number) => ({
-                id: rec.id,
-                image: `${API_BASE_URL}/api/images/${rec.image_path.split(/\\|\//).pop()}`, 
-                title: `${itemToRecommend.name} 아이템과 유사`,
-                items: [rec.name, rec.category],
-                score: Math.round((1.0 - rec.distance) * 100), 
-                reason: `유사도 점수: ${(1.0 - rec.distance).toFixed(2)}`,
-            }));
-            
-            setRecommendations(recs);
-            Alert.alert('추천 완료', `${itemToRecommend.name}와 유사한 아이템 ${recs.length}개를 찾았습니다.`);
+      if (data.success && data.recommendations) {
+        const recs: Rec[] = data.recommendations.map((rec: any, index: number) => ({
+          id: rec.id,
+          image: `${API_BASE_URL}/api/images/${rec.image_path.split(/\\|\//).pop()}`, 
+          title: `${itemToRecommend.name} 아이템과 유사`,
+          items: [rec.name, rec.category],
+          score: Math.round((1.0 - rec.distance) * 100), 
+          reason: `유사도 점수: ${(1.0 - rec.distance).toFixed(2)}`,
+          is_default: rec.is_default || false,  // ✅ 추가
+        }));
+        
+        setRecommendations(recs);
+        
+        // ✅ 기본 아이템 포함 여부 안내
+        const hasDefaultItems = recs.some(r => r.is_default);
+        if (hasDefaultItems) {
+          Alert.alert(
+            '추천 완료',
+            `${itemToRecommend.name}와 유사한 아이템 ${recs.length}개를 찾았습니다.\n\n일부 기본 추천 아이템이 포함되었습니다.`
+          );
         } else {
-            Alert.alert('추천 실패', data.detail || '추천 목록을 가져오지 못했습니다.');
-            setRecommendations([]);
+          Alert.alert('추천 완료', `${itemToRecommend.name}와 유사한 아이템 ${recs.length}개를 찾았습니다.`);
         }
+      } else {
+        Alert.alert('추천 실패', data.detail || '추천 목록을 가져오지 못했습니다.');
+        setRecommendations([]);
+      }
     } catch (error) {
-        console.error('❌ 추천 네트워크 오류:', error);
-        Alert.alert('네트워크 오류', '추천 서버와 연결할 수 없습니다.');
+      console.error('❌ 추천 네트워크 오류:', error);
+      Alert.alert('네트워크 오류', '추천 서버와 연결할 수 없습니다.');
     } finally {
-        setRecommending(false);
+      setRecommending(false);
     }
   };
 
