@@ -132,11 +132,21 @@ export default function WardrobeManagement({
           // ✅ 이미지 URL 생성 (카테고리별 경로 사용)
           let imageUrl = '';
           
+          console.log(`🖼️ 이미지 URL 생성 중 - item ${item.id}:`);
+          console.log(`  - image_path: ${item.image_path}`);
+          console.log(`  - image_category: ${item.image_category}`);
+          
           if (item.image_category === 'original') {
             imageUrl = `${API_BASE_URL}/api/images/${item.image_path}`;
-          } else {
+          } else if (item.image_category) {
+            // full, top, bottom, outer
             imageUrl = `${API_BASE_URL}/api/processed-images/${item.image_category}/${item.image_path}`;
+          } else {
+            // 카테고리 정보가 없으면 원본 경로 사용
+            imageUrl = `${API_BASE_URL}/api/images/${item.image_path}`;
           }
+          
+          console.log(`  ✅ 생성된 URL: ${imageUrl}`);
           
           console.log(`📸 아이템 ${item.id}:`, {
             name,

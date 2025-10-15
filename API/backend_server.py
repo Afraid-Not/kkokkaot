@@ -13,6 +13,8 @@ from psycopg2.extras import Json
 from fastapi.responses import FileResponse
 import os
 from contextlib import asynccontextmanager
+from _llm_recommender import LLMRecommender
+
 
 # AI 파이프라인 import
 sys.path.append(str(Path(__file__).parent))
@@ -20,19 +22,22 @@ from _main_pipeline import FashionPipeline
 
 # ✅ 전역 변수를 먼저 선언
 pipeline = None
+llm_recommender = None  # 👈 추가!
 
 # ✅ lifespan 함수
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    global pipeline
+    global pipeline, llm_recommender  # 👈 llm_recommender 추가
     
     print("\n🤖 AI 파이프라인 초기화 중...")
     try:
         pipeline = FashionPipeline(
             yolo_pose_path="D:/kkokkaot/API/pre_trained_weights/yolo11n-pose.pt",
-            top_model_path="D:/kkokkaot/API/pre_trained_weights/fashion_top_model.pth",
-            bottom_model_path="D:/kkokkaot/API/pre_trained_weights/fashion_bottom_model.pth",
+            top_model_path="D:/kkokkaot/API/pre_trained_weights/fashion_top_model_1014_2101.pth",
+            bottom_model_path="D:/kkokkaot/API/pre_trained_weights/fashion_bottom_model_1015_1038.pth",
+            # top_model_path="D:/kkokkaot/API/pre_trained_weights/fashion_top_model.pth",
+            # bottom_model_path="D:/kkokkaot/API/pre_trained_weights/fashion_bottom_model.pth",
             chroma_path="D:/kkokkaot/API/chroma_db",
             db_config={
                 'host': 'localhost',
@@ -48,12 +53,34 @@ async def lifespan(app: FastAPI):
         print("⚠️ 이미지 업로드만 가능하고 AI 분석은 비활성화됩니다.\n")
         pipeline = None
     
+    # 👇 LLM 추천 시스템 초기화 추가
+    print("\n💬 LLM 추천 시스템 초기화 중...")
+    try:
+        llm_recommender = LLMRecommender(
+            db_config={
+                'host': 'localhost',
+                'port': 5432,
+                'database': 'kkokkaot_closet',
+                'user': 'postgres',
+                'password': '000000'
+            }
+        )
+        print("✅ LLM 추천 시스템 초기화 완료!\n")
+    except Exception as e:
+        print(f"⚠️ LLM 추천 시스템 초기화 실패: {e}")
+        print("⚠️ 대화형 추천 기능은 비활성화됩니다.\n")
+        llm_recommender = None
+    
     yield  # 서버 실행
     
     # Shutdown
     if pipeline:
         pipeline.close()
         print("PostgreSQL 연결 종료")
+    
+    if llm_recommender:  # 👈 추가
+        llm_recommender.close()
+        print("LLM 추천 시스템 종료")
 
 # FastAPI 앱 생성
 app = FastAPI(title="꼬까옷 백엔드 서버", lifespan=lifespan)
@@ -467,13 +494,13 @@ def get_wardrobe(user_id: int, include_defaults: bool = True):
                 outer_keywords = ['coat', 'jacket', 'blazer', 'cardigan', 'jumper']
                 is_outer = any(keyword in top_category for keyword in outer_keywords)
                 
-                # ✅ YOLO Pose로 자른 이미지 경로 우선 사용
+                # 1순위: 전체 이미지 (full)
                 display_image_path = None
                 
                 # 1순위: 전체 이미지 (full)
                 full_path = processed_dir / 'full' / f"item_{item_id}_full.jpg"
                 if full_path.exists():
-                    display_image_path = f"item_{item_id}_full.jpg"
+                    display_image_path = f"item_{item_id}_full.jpg"  # 👈 파일명만!
                     image_category = 'full'
                 
                 # 2순위: 상의가 있으면 상의 이미지 (top 또는 outer)
@@ -481,25 +508,25 @@ def get_wardrobe(user_id: int, include_defaults: bool = True):
                     if is_outer:
                         outer_path = processed_dir / 'outer' / f"item_{item_id}_outer.jpg"
                         if outer_path.exists():
-                            display_image_path = f"item_{item_id}_outer.jpg"
+                            display_image_path = f"item_{item_id}_outer.jpg"  # 👈 파일명만!
                             image_category = 'outer'
                     else:
                         top_path = processed_dir / 'top' / f"item_{item_id}_top.jpg"
                         if top_path.exists():
-                            display_image_path = f"item_{item_id}_top.jpg"
+                            display_image_path = f"item_{item_id}_top.jpg"  # 👈 파일명만!
                             image_category = 'top'
                 
                 # 3순위: 하의 이미지
                 elif row[4]:  # has_bottom
                     bottom_path = processed_dir / 'bottom' / f"item_{item_id}_bottom.jpg"
                     if bottom_path.exists():
-                        display_image_path = f"item_{item_id}_bottom.jpg"
+                        display_image_path = f"item_{item_id}_bottom.jpg"  # 👈 파일명만!
                         image_category = 'bottom'
                 
                 # 4순위: 원본 이미지 (폴백)
                 if not display_image_path:
                     filename = Path(image_path).name
-                    display_image_path = filename
+                    display_image_path = filename  # 👈 파일명만!
                     image_category = 'original'
                 
                 # 분리된 이미지 경로들
@@ -1158,6 +1185,123 @@ def get_processed_image(filename: str):
     
     print(f"❌ 이미지 파일을 찾을 수 없습니다: {filename}")
     raise HTTPException(status_code=404, detail="Image not found")
+
+@app.post("/api/chat/recommend")
+async def chat_recommend(
+    user_id: int = Form(...),
+    message: str = Form(...)
+):
+    """
+    LLM 기반 대화형 옷 추천 API
+    
+    사용자 메시지를 받아서:
+    1. LLM과 대화
+    2. 컨텍스트 추출 (날씨, 상황, 건강 등)
+    3. 적절한 옷 추천
+    """
+    
+    print(f"\n{'='*60}")
+    print(f"💬 LLM 채팅 요청")
+    print(f"  - user_id: {user_id}")
+    print(f"  - message: {message}")
+    print(f"{'='*60}")
+    
+    if not llm_recommender:
+        return {
+            "success": False,
+            "message": "LLM 추천 시스템이 비활성화되어 있습니다."
+        }
+    
+    try:
+        # LLM 대화 및 추천 생성
+        result = llm_recommender.chat(user_id, message)
+        
+        # 추천 아이템 상세 정보 가져오기
+        recommended_items = []
+        if result['recommendations']:
+            with pipeline.db_conn.cursor() as cur:
+                for item_id in result['recommendations']:
+                    cur.execute("""
+                        SELECT 
+                            w.item_id,
+                            w.original_image_path,
+                            w.has_top,
+                            w.has_bottom,
+                            t.category as top_category,
+                            t.color as top_color,
+                            b.category as bottom_category,
+                            b.color as bottom_color
+                        FROM wardrobe_items w
+                        LEFT JOIN top_attributes t ON w.item_id = t.item_id
+                        LEFT JOIN bottom_attributes b ON w.item_id = b.item_id
+                        WHERE w.item_id = %s
+                    """, (item_id,))
+                    
+                    row = cur.fetchone()
+                    if row:
+                        item_data = {
+                            'id': row[0],
+                            'image': f"/api/images/{Path(row[1]).name}",
+                            'has_top': row[2],
+                            'has_bottom': row[3],
+                            'top_category': row[4],
+                            'top_color': row[5],
+                            'bottom_category': row[6],
+                            'bottom_color': row[7],
+                        }
+                        recommended_items.append(item_data)
+        
+        print(f"\n✅ LLM 응답 생성 완료")
+        print(f"  - 추천 아이템: {len(recommended_items)}개")
+        print(f"  - 추가 정보 필요: {result['need_more_info']}")
+        print(f"{'='*60}\n")
+        
+        return {
+            "success": True,
+            "response": result['response'],
+            "context": result['context'],
+            "recommendations": recommended_items,
+            "need_more_info": result['need_more_info']
+        }
+    
+    except Exception as e:
+        print(f"❌ LLM 채팅 오류: {e}")
+        import traceback
+        traceback.print_exc()
+        
+        return {
+            "success": False,
+            "message": f"오류 발생: {str(e)}"
+        }
+
+
+# 💬 대화 히스토리 초기화 API
+@app.post("/api/chat/reset")
+async def reset_chat(user_id: int = Form(...)):
+    """사용자의 대화 히스토리 초기화"""
+    
+    print(f"\n🔄 대화 히스토리 초기화 요청 (user_id: {user_id})")
+    
+    if not llm_recommender:
+        return {
+            "success": False,
+            "message": "LLM 추천 시스템이 비활성화되어 있습니다."
+        }
+    
+    try:
+        llm_recommender.reset_conversation(user_id)
+        
+        return {
+            "success": True,
+            "message": "대화 히스토리가 초기화되었습니다."
+        }
+    
+    except Exception as e:
+        print(f"❌ 초기화 오류: {e}")
+        return {
+            "success": False,
+            "message": f"오류 발생: {str(e)}"
+        }
 
 # 서버 실행
 if __name__ == "__main__":
