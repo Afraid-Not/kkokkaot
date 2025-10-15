@@ -62,7 +62,7 @@ export default function WardrobeManagement({
 
     setLoading(true);
     try {
-      const url = `${API_BASE_URL}/api/wardrobe/${userId}`;
+      const url = `${API_BASE_URL}/api/wardrobe/${userId}?include_defaults=true`;
       console.log('\n========================================');
       console.log('🔍 옷장 조회 시작');
       console.log('👤 user_id:', userId);
@@ -80,6 +80,18 @@ export default function WardrobeManagement({
 
       if (data.success) {
         console.log('✅ 성공! 아이템 개수:', data.items.length);
+        
+        // ✅ 기본 아이템 여부 확인
+        const hasUserItems = data.has_user_items;
+        
+        if (!hasUserItems && data.items.length > 0) {
+          // 기본 아이템만 있는 경우 안내 메시지 표시
+          Alert.alert(
+            '기본 아이템 표시 중',
+            '아직 등록된 옷이 없어서 추천용 기본 아이템을 보여드립니다.\n\n"추가" 버튼으로 나만의 옷을 등록해보세요!',
+            [{ text: '확인' }]
+          );
+        }
         
         const wardrobeItems: Item[] = data.items.map((item: any, index: number) => {
           
@@ -101,10 +113,11 @@ export default function WardrobeManagement({
           return {
             id: item.id,
             name: name || '새 아이템',
-            brand: 'My Wardrobe',
+            brand: item.is_default ? '기본 아이템' : 'My Wardrobe',
             image: imageUrl,
             category: category,
             loved: false,
+            is_default: item.is_default || false,
           };
         });
         

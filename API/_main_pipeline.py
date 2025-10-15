@@ -22,11 +22,11 @@ class FashionPipeline:
     """가상옷장 전체 파이프라인"""
     
     def __init__(self, 
-                yolo_pose_path: str = "yolo11n-pose.pt",
-                # top_model_path: str = "fashion_top_model.pth",
-                top_model_path: str = "fashion_attr_resnet50_epochs200_best.pth",
-                # bottom_model_path: str = "fashion_bottom_model.pth",
-                bottom_model_path: str = "fashion_attr_resnet50_epochs200_best.pth",
+                yolo_pose_path: str = "./API/pre_trained_weights/yolo11n-pose.pt",
+                # top_model_path: str = "./API/pre_trained_weights/fashion_top_model.pth",
+                top_model_path: str = "./API/pre_trained_weights/fashion_attr_resnet50_epochs200_best.pth",
+                # bottom_model_path: str = "./API/pre_trained_weights/fashion_bottom_model.pth",
+                bottom_model_path: str = "./API/pre_trained_weights/fashion_attr_resnet50_epochs200_best.pth",
                 chroma_path: str = "./chroma_db",
                 db_config: dict = None):
         """초기화"""
@@ -246,74 +246,91 @@ class FashionPipeline:
     
     
     def save_to_postgresql(self, user_id: int, image_path: str, 
-                          separation_result: Dict, 
-                          top_attrs: Dict = None, 
-                          bottom_attrs: Dict = None,
-                          chroma_id: str = None) -> int:
+                        separation_result: Dict, 
+                        top_attrs: Dict = None, 
+                        bottom_attrs: Dict = None,
+                        chroma_id: str = None) -> int:
         """4단계: PostgreSQL에 저장"""
         
         print("[4/6] PostgreSQL에 저장 중...")
         
-        with self.db_conn.cursor() as cur:
-            # wardrobe_items 삽입
-            cur.execute("""
-                INSERT INTO wardrobe_items (
-                    user_id, original_image_path, 
-                    has_top, has_bottom,
-                    waist_y, chroma_embedding_id
-                ) VALUES (%s, %s, %s, %s, %s, %s)
-                RETURNING item_id
-            """, (
-                user_id, 
-                image_path,
-                separation_result['has_top'],
-                separation_result['has_bottom'],
-                separation_result['waist_y'],
-                chroma_id
-            ))
-            
-            item_id = cur.fetchone()[0]
-            
-            # 상의 속성
-            if top_attrs and separation_result['has_top']:
+        # ✅ 트랜잭션 시작 전 기존 트랜잭션 정리
+        try:
+            self.db_conn.rollback()
+        except:
+            pass
+        
+        try:
+            with self.db_conn.cursor() as cur:
+                # wardrobe_items 삽입
                 cur.execute("""
-                    INSERT INTO top_attributes (
-                        item_id, category, color, fit, materials,
-                        category_confidence, color_confidence, fit_confidence
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    INSERT INTO wardrobe_items (
+                        user_id, original_image_path, 
+                        has_top, has_bottom,
+                        waist_y, chroma_embedding_id
+                    ) VALUES (%s, %s, %s, %s, %s, %s)
+                    RETURNING item_id
                 """, (
-                    item_id,
-                    top_attrs['category'],
-                    top_attrs['color'],
-                    top_attrs['fit'],
-                    Json(top_attrs['materials']),
-                    top_attrs['category_confidence'],
-                    top_attrs['color_confidence'],
-                    top_attrs['fit_confidence']
+                    user_id, 
+                    image_path,
+                    separation_result['has_top'],
+                    separation_result['has_bottom'],
+                    separation_result['waist_y'],
+                    chroma_id
                 ))
+                
+                item_id = cur.fetchone()[0]
+                
+                # 상의 속성
+                if top_attrs and separation_result['has_top']:
+                    cur.execute("""
+                        INSERT INTO top_attributes (
+                            item_id, category, color, fit, materials,
+                            category_confidence, color_confidence, fit_confidence
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    """, (
+                        item_id,
+                        top_attrs['category'],
+                        top_attrs['color'],
+                        top_attrs['fit'],
+                        Json(top_attrs['materials']),
+                        top_attrs['category_confidence'],
+                        top_attrs['color_confidence'],
+                        top_attrs['fit_confidence']
+                    ))
+                
+                # 하의 속성
+                if bottom_attrs and separation_result['has_bottom']:
+                    cur.execute("""
+                        INSERT INTO bottom_attributes (
+                            item_id, category, color, fit, materials,
+                            category_confidence, color_confidence, fit_confidence
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    """, (
+                        item_id,
+                        bottom_attrs['category'],
+                        bottom_attrs['color'],
+                        bottom_attrs['fit'],
+                        Json(bottom_attrs['materials']),
+                        bottom_attrs['category_confidence'],
+                        bottom_attrs['color_confidence'],
+                        bottom_attrs['fit_confidence']
+                    ))
+                
+                # ✅ 커밋
+                self.db_conn.commit()
+                
+            print(f"  - 아이템 ID: {item_id}")
+            return item_id
             
-            # 하의 속성
-            if bottom_attrs and separation_result['has_bottom']:
-                cur.execute("""
-                    INSERT INTO bottom_attributes (
-                        item_id, category, color, fit, materials,
-                        category_confidence, color_confidence, fit_confidence
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                """, (
-                    item_id,
-                    bottom_attrs['category'],
-                    bottom_attrs['color'],
-                    bottom_attrs['fit'],
-                    Json(bottom_attrs['materials']),
-                    bottom_attrs['category_confidence'],
-                    bottom_attrs['color_confidence'],
-                    bottom_attrs['fit_confidence']
-                ))
-            
-            self.db_conn.commit()
-            
-        print(f"  - 아이템 ID: {item_id}")
-        return item_id
+        except Exception as e:
+            # ✅ 에러 발생 시 명시적 rollback
+            try:
+                self.db_conn.rollback()
+                print(f"  ❌ PostgreSQL 저장 실패 (rollback 완료): {e}")
+            except:
+                print(f"  ❌ PostgreSQL 저장 실패: {e}")
+            raise e
     
     
     def save_to_chromadb(self, item_id: int, embedding: np.ndarray, 
@@ -457,6 +474,14 @@ class FashionPipeline:
             print(f"\n✗ 에러 발생: {e}")
             import traceback
             traceback.print_exc()
+            
+            # ✅ 트랜잭션 rollback (추가)
+            try:
+                if hasattr(self, 'db_conn') and self.db_conn:
+                    self.db_conn.rollback()
+            except:
+                pass
+            
             return {
                 'success': False,
                 'error': str(e)
