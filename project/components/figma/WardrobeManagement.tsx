@@ -1,6 +1,6 @@
 // components/figma/WardrobeManagement.tsx
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';  // ✅ useMemo 추가
 import {
   View,
   Text,
@@ -29,6 +29,7 @@ type Item = {
   image: string; 
   category: string; 
   loved: boolean;
+  is_outer?: boolean;  // ✅ 추가
 };
 
 // 🌐 API 주소 (ngrok 주소로 변경하세요)
@@ -45,13 +46,15 @@ export default function WardrobeManagement({
   const [uploading, setUploading] = useState(false);
   const [items, setItems] = useState<Item[]>([]);
   const [loading, setLoading] = useState(true);
-  const [userId, setUserId] = useState<number | null>(null); // 👈 실제 user_id
-
-  // ✅ 상세 정보 모달 state 추가
+  const [userId, setUserId] = useState<number | null>(null);
+  
+  // ✅ 카테고리 필터 추가
+  const [selectedCategory, setSelectedCategory] = useState<'all' | 'full' | 'top' | 'outer' | 'bottom'>('all');
+  
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [selectedItemDetail, setSelectedItemDetail] = useState<any>(null);
 
-  const total = items.length;
+  // const total = items.length;
 
   // 📥 옷장 데이터 가져오기 (useCallback을 사용하여 최적화)
   const fetchWardrobe = useCallback(async () => {
@@ -70,10 +73,8 @@ export default function WardrobeManagement({
       console.log('========================================\n');
       
       const response = await fetch(url);
-      
-      // 응답 본문 처리 로직
       const text = await response.text();
-      console.log('📝 응답 본문 (text):', text.substring(0, 200));
+      console.log('📄 응답 본문 (text):', text.substring(0, 200));
 
       const data = JSON.parse(text);
       console.log('📦 서버 응답 (JSON):', data);
@@ -81,11 +82,9 @@ export default function WardrobeManagement({
       if (data.success) {
         console.log('✅ 성공! 아이템 개수:', data.items.length);
         
-        // ✅ 기본 아이템 여부 확인
         const hasUserItems = data.has_user_items;
         
         if (!hasUserItems && data.items.length > 0) {
-          // 기본 아이템만 있는 경우 안내 메시지 표시
           Alert.alert(
             '기본 아이템 표시 중',
             '아직 등록된 옷이 없어서 추천용 기본 아이템을 보여드립니다.\n\n"추가" 버튼으로 나만의 옷을 등록해보세요!',
@@ -94,21 +93,58 @@ export default function WardrobeManagement({
         }
         
         const wardrobeItems: Item[] = data.items.map((item: any, index: number) => {
-          
           let name = '';
           let category = '';
+          let is_outer = false;
           
-          if (item.has_top && item.top_category) {
+          // ✅ 상의와 하의 모두 있는 경우 처리
+          if (item.has_top && item.has_bottom) {
+            // 상의 + 하의 모두 있는 경우
+            const topName = `${item.top_color || ''} ${item.top_category || ''}`.trim();
+            const bottomName = `${item.bottom_color || ''} ${item.bottom_category || ''}`.trim();
+            
+            // 아우터 판단
+            const outerKeywords = ['coat', 'jacket', 'blazer', 'cardigan', 'jumper'];
+            is_outer = item.top_category && outerKeywords.some(keyword => 
+              item.top_category.toLowerCase().includes(keyword)
+            );
+            
+            name = `${topName} + ${bottomName}`;  // "화이트 셔츠 + 블랙 팬츠"
+            category = '전체';  // 전체 코디
+            
+          } else if (item.has_top && item.top_category) {
+            // 상의만 있는 경우
             name = `${item.top_color || ''} ${item.top_category}`.trim();
-            category = '상의';
+            
+            const outerKeywords = ['coat', 'jacket', 'blazer', 'cardigan', 'jumper'];
+            is_outer = outerKeywords.some(keyword => 
+              item.top_category.toLowerCase().includes(keyword)
+            );
+            
+            category = is_outer ? '아우터' : '상의';
+            
           } else if (item.has_bottom && item.bottom_category) {
+            // 하의만 있는 경우
             name = `${item.bottom_color || ''} ${item.bottom_category}`.trim();
             category = '하의';
           }
           
-          // 파일명 추출 시 슬래시/역슬래시 모두 처리
-          const filename = item.image_path.split(/\\|\//).pop();
-          const imageUrl = `${API_BASE_URL}/api/images/${filename}`;
+          // ✅ 이미지 URL 생성 (카테고리별 경로 사용)
+          let imageUrl = '';
+          
+          if (item.image_category === 'original') {
+            imageUrl = `${API_BASE_URL}/api/images/${item.image_path}`;
+          } else {
+            imageUrl = `${API_BASE_URL}/api/processed-images/${item.image_category}/${item.image_path}`;
+          }
+          
+          console.log(`📸 아이템 ${item.id}:`, {
+            name,
+            category,
+            has_top: item.has_top,
+            has_bottom: item.has_bottom,
+            imageUrl
+          });
           
           return {
             id: item.id,
@@ -118,6 +154,7 @@ export default function WardrobeManagement({
             category: category,
             loved: false,
             is_default: item.is_default || false,
+            is_outer: is_outer,
           };
         });
         
@@ -141,7 +178,7 @@ export default function WardrobeManagement({
     } finally {
       setLoading(false);
     }
-  }, [userId]); // userId가 변경될 때만 fetchWardrobe 재생성
+  }, [userId]);
 
   // ✅ 1. 로그인한 사용자 정보 불러오기
   useEffect(() => {
@@ -395,6 +432,28 @@ export default function WardrobeManagement({
       );
     }
   };
+  const filteredItems = useMemo(() => {
+    if (selectedCategory === 'all') {
+      return items;
+    }
+    
+    return items.filter(item => {
+      if (selectedCategory === 'outer') {
+        // 아우터만 (상의+하의 세트는 제외하고 아우터만 있는 것)
+        return item.is_outer === true && item.category !== '전체';
+      } else if (selectedCategory === 'top') {
+        // ✅ 상의가 있는 모든 아이템 (전체 코디 포함, 아우터 제외)
+        return (item.category === '상의' && !item.is_outer) || 
+              (item.category === '전체' && !item.is_outer);
+      } else if (selectedCategory === 'bottom') {
+        // ✅ 하의가 있는 모든 아이템 (전체 코디 포함)
+        return item.category === '하의' || item.category === '전체';
+      }
+      return false;
+    });
+  }, [items, selectedCategory]);
+
+  const total = filteredItems.length;
 
   // 헤더 우측 버튼
   const HeaderRightAction = (
@@ -458,9 +517,22 @@ export default function WardrobeManagement({
               </Pressable>
             </View>
 
-            {/* 원본 이미지 */}
+            {/* ✅ 전체 이미지 섹션 추가 */}
+            {item.full_image_path && (
+              <View style={styles.modalSection}>
+                <Text style={styles.modalSectionTitle}>📸 전체 이미지</Text>
+                <Image 
+                  source={{ uri: `${API_BASE_URL}${item.full_image_path}` }} 
+                  style={styles.modalOriginalImage}
+                  resizeMode="contain"
+                />
+              </View>
+            )}
+
+
+            {/* 원본 이미지 섹션 수정 */}
             <View style={styles.modalSection}>
-              <Text style={styles.modalSectionTitle}>📸 원본 이미지</Text>
+              <Text style={styles.modalSectionTitle}>📷 원본 이미지</Text>
               <Image 
                 source={{ uri: `${API_BASE_URL}/api/images/${item.original_image_path.split(/\\|\//).pop()}` }} 
                 style={styles.modalOriginalImage}
@@ -468,15 +540,18 @@ export default function WardrobeManagement({
               />
             </View>
 
+
             {/* 상의 정보 */}
+            {/* 상의 정보 - 아우터 표시 추가 */}
             {item.has_top && item.top_attributes && (
               <View style={styles.modalSection}>
-                <Text style={styles.modalSectionTitle}>👕 상의</Text>
+                <Text style={styles.modalSectionTitle}>
+                  {item.is_outer ? '🧥 아우터' : '👕 상의'}
+                </Text>
                 
-                {/* 상의 이미지 */}
                 {item.top_image_path && (
                   <Image 
-                    source={{ uri: `${API_BASE_URL}/api/processed-images/item_${item.item_id}_top.jpg` }} 
+                    source={{ uri: `${API_BASE_URL}${item.top_image_path}` }} 
                     style={styles.modalSeparatedImage}
                     resizeMode="contain"
                   />
@@ -576,6 +651,7 @@ export default function WardrobeManagement({
       <AppHeader title="내 옷장" subtitle={`${total}개 아이템`} onBack={onBack} rightAction={HeaderRightAction} />
 
       <ScrollView contentContainerStyle={styles.screenPad}>
+        {/* 검색 바 */}
         <View style={{ position: 'relative', marginBottom: 16 }}>
           <View style={{position: 'absolute', left: 12, top: 14, zIndex: 1}}>
             <Search size={16} color="#9CA3AF" />
@@ -584,14 +660,83 @@ export default function WardrobeManagement({
           <Pressable style={styles.filterBtn}><Filter size={16} color="#111" /></Pressable>
         </View>
 
-        {items.length === 0 ? (
+        {/* 카테고리 필터 */}
+        <View style={styles.categoryFilter}>
+          <Pressable 
+            style={[
+              styles.categoryBtn, 
+              selectedCategory === 'all' && styles.categoryBtnActive
+            ]}
+            onPress={() => setSelectedCategory('all')}
+          >
+            <Text style={[
+              styles.categoryBtnText,
+              selectedCategory === 'all' && styles.categoryBtnTextActive
+            ]}>
+              전체 ({items.length})
+            </Text>
+          </Pressable>
+
+          <Pressable 
+            style={[
+              styles.categoryBtn, 
+              selectedCategory === 'top' && styles.categoryBtnActive
+            ]}
+            onPress={() => setSelectedCategory('top')}
+          >
+            <Text style={[
+              styles.categoryBtnText,
+              selectedCategory === 'top' && styles.categoryBtnTextActive
+            ]}>
+              👕 상의 ({items.filter(i => (i.category === '상의' && !i.is_outer) || (i.category === '전체' && !i.is_outer)).length})
+            </Text>
+          </Pressable>
+
+          <Pressable 
+            style={[
+              styles.categoryBtn, 
+              selectedCategory === 'outer' && styles.categoryBtnActive
+            ]}
+            onPress={() => setSelectedCategory('outer')}
+          >
+            <Text style={[
+              styles.categoryBtnText,
+              selectedCategory === 'outer' && styles.categoryBtnTextActive
+            ]}>
+              🧥 아우터 ({items.filter(i => i.is_outer === true && i.category !== '전체').length})
+            </Text>
+          </Pressable>
+
+          <Pressable 
+            style={[
+              styles.categoryBtn, 
+              selectedCategory === 'bottom' && styles.categoryBtnActive
+            ]}
+            onPress={() => setSelectedCategory('bottom')}
+          >
+            <Text style={[
+              styles.categoryBtnText,
+              selectedCategory === 'bottom' && styles.categoryBtnTextActive
+            ]}>
+              👖 하의 ({items.filter(i => i.category === '하의' || i.category === '전체').length})
+            </Text>
+          </Pressable>
+        </View>
+
+        {/* 아이템 그리드 - items를 filteredItems로 변경 */}
+        {filteredItems.length === 0 ? (
           <View style={{ paddingVertical: 60, alignItems: 'center' }}>
-            <Text style={{ fontSize: 16, color: '#9CA3AF', marginBottom: 8 }}>아직 옷이 없어요</Text>
+            <Text style={{ fontSize: 16, color: '#9CA3AF', marginBottom: 8 }}>
+              {selectedCategory === 'all' 
+                ? '아직 옷이 없어요' 
+                : `${selectedCategory === 'outer' ? '아우터' : 
+                    selectedCategory === 'top' ? '상의' : '하의'}가 없어요`}
+            </Text>
             <Text style={{ fontSize: 14, color: '#D1D5DB' }}>우측 상단 "추가" 버튼을 눌러 옷을 등록해보세요!</Text>
           </View>
         ) : viewMode === 'grid' ? (
           <View style={styles.gridWrap}>
-            {items.map((item) => (
+            {filteredItems.map((item) => (
               <Pressable key={item.id} style={styles.card}>
                 <Image 
                   source={{ uri: item.image }} 
@@ -601,7 +746,6 @@ export default function WardrobeManagement({
                 />
                 <View style={styles.cardTopRight}>
                   {item.loved && <View style={styles.roundBtnWhite}><Heart size={14} color="#EF4444" fill="#EF4444" /></View>}
-                  {/* ... 버튼에 showItemOptions 연결 */}
                   <Pressable style={styles.roundBtnWhite} onPress={() => showItemOptions(item)}>
                     <MoreVertical size={14} color="#111" />
                   </Pressable>
@@ -621,8 +765,6 @@ export default function WardrobeManagement({
       </ScrollView>
       
       <BottomNavBar activeScreen="wardrobe-management" onNavigate={onNavigate} />
-      
-      {/* ✅ 상세 정보 모달 추가 */}
       {renderDetailModal()}
     </SafeAreaView>
   );
@@ -643,6 +785,38 @@ const styles = StyleSheet.create({
   addBtnDisabled: {
     opacity: 0.6,
   },
+
+  // ✅ 카테고리 필터 스타일 추가
+  categoryFilter: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 16,
+    flexWrap: 'wrap',
+  },
+  categoryBtn: {
+    flex: 1,
+    minWidth: '22%',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    backgroundColor: '#F9FAFB',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    alignItems: 'center',
+  },
+  categoryBtnActive: {
+    backgroundColor: '#111',
+    borderColor: '#111',
+  },
+  categoryBtnText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#6B7280',
+  },
+  categoryBtnTextActive: {
+    color: '#FFF',
+  },
+
   addBtnText: { color: '#FFF', fontSize: 13, fontWeight: '600' },
   screenPad: { padding: 16, paddingBottom: 24 },
   searchInput: { 

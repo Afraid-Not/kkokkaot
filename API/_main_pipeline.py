@@ -378,7 +378,7 @@ class FashionPipeline:
     
     
     def process_image(self, image_path: str, user_id: int, 
-                     save_separated_images: bool = False) -> Dict:
+                    save_separated_images: bool = False) -> Dict:
         """전체 파이프라인 실행"""
         
         print(f"\n{'='*60}")
@@ -389,17 +389,27 @@ class FashionPipeline:
             # 1. 이미지 분리
             separation = self.separate_top_bottom(image_path)
             
-            # 2. 속성 예측
+            # 2. ✅ 속성 예측 - 자른 이미지를 각각 모델에 입력!
             top_attrs = None
             bottom_attrs = None
             
             if separation['has_top']:
-                top_attrs = self.predict_attributes(separation['top'], is_top=True)
+                # 상의 이미지를 상의 모델에 입력
+                print("[2-1/6] 상의 이미지로 상의 속성 예측...")
+                top_attrs = self.predict_attributes(
+                    separation['top'],  # ✅ 자른 상의 이미지
+                    is_top=True
+                )
             
             if separation['has_bottom']:
-                bottom_attrs = self.predict_attributes(separation['bottom'], is_top=False)
+                # 하의 이미지를 하의 모델에 입력
+                print("[2-2/6] 하의 이미지로 하의 속성 예측...")
+                bottom_attrs = self.predict_attributes(
+                    separation['bottom'],  # ✅ 자른 하의 이미지
+                    is_top=False
+                )
             
-            # 3. 임베딩 생성 (원본 이미지로)
+            # 3. 임베딩 생성 (원본 전체 이미지로)
             embedding = self.create_embedding(separation['original'])
             
             # 4. 메타데이터 준비
@@ -423,7 +433,7 @@ class FashionPipeline:
             item_id = self.save_to_postgresql(
                 user_id, image_path, separation, 
                 top_attrs, bottom_attrs, 
-                chroma_id=None  # 일단 None
+                chroma_id=None
             )
             
             # 6. ChromaDB 저장
@@ -441,23 +451,55 @@ class FashionPipeline:
             # 8. 유사 아이템 검색
             similar_items = self.search_similar(embedding, n_results=5)
             
-            # 9. 분리된 이미지 저장 (선택)
+            # 9. ✅ 분리된 이미지 저장 (폴더 구조)
             if save_separated_images:
-                output_dir = Path("./processed_images")
-                output_dir.mkdir(exist_ok=True)
+                # 📁 카테고리별 폴더 구조 생성
+                base_dir = Path("./processed_images")
+                folders = {
+                    'full': base_dir / 'full',
+                    'top': base_dir / 'top',
+                    'bottom': base_dir / 'bottom',
+                    'outer': base_dir / 'outer'
+                }
                 
-                if separation['has_top']:
-                    top_path = output_dir / f"item_{item_id}_top.jpg"
+                for folder in folders.values():
+                    folder.mkdir(parents=True, exist_ok=True)
+                
+                # 전체 이미지 저장
+                full_path = folders['full'] / f"item_{item_id}_full.jpg"
+                Image.fromarray(separation['original']).save(full_path)
+                print(f"  ✅ 전체 이미지 저장: {full_path}")
+                
+                # 상의 저장 (카테고리에 따라 분류)
+                if separation['has_top'] and top_attrs:
+                    category = top_attrs['category'].lower()
+                    
+                    # 아우터 판단
+                    outer_keywords = ['coat', 'jacket', 'blazer', 'cardigan', 'jumper']
+                    is_outer = any(keyword in category for keyword in outer_keywords)
+                    
+                    if is_outer:
+                        top_path = folders['outer'] / f"item_{item_id}_outer.jpg"
+                    else:
+                        top_path = folders['top'] / f"item_{item_id}_top.jpg"
+                    
                     Image.fromarray(separation['top']).save(top_path)
+                    print(f"  ✅ 상의 저장: {top_path}")
                 
+                # 하의 저장
                 if separation['has_bottom']:
-                    bottom_path = output_dir / f"item_{item_id}_bottom.jpg"
+                    bottom_path = folders['bottom'] / f"item_{item_id}_bottom.jpg"
                     Image.fromarray(separation['bottom']).save(bottom_path)
+                    print(f"  ✅ 하의 저장: {bottom_path}")
             
             print(f"\n{'='*60}")
-            print(f"✓ 파이프라인 완료!")
+            print(f"✔ 파이프라인 완료!")
             print(f"  - 아이템 ID: {item_id}")
             print(f"  - Chroma ID: {chroma_id}")
+            if top_attrs:
+                print(f"  - 상의: {top_attrs['category']} ({top_attrs['color']})")
+            if bottom_attrs:
+                print(f"  - 하의: {bottom_attrs['category']} ({bottom_attrs['color']})")
             print(f"{'='*60}\n")
             
             return {
