@@ -9,6 +9,9 @@ import {
   Pressable,
   ActivityIndicator,
   Alert,
+  TextInput,        // 👈 추가
+  KeyboardAvoidingView,  // 👈 추가
+  Platform,         // 👈 이미 있으면 생략
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
@@ -18,6 +21,9 @@ import {
   MapPin,
   RefreshCw,
   Zap,
+  MessageCircle,  // 👈 추가
+  Send,           // 👈 추가
+  X,              // 👈 추가
 } from 'lucide-react-native';
 import AppHeader from '../common/AppHeader';
 import BottomNavBar from '../common/BottomNavBar';
@@ -46,6 +52,12 @@ type Rec = {
   score: number;
   reason: string;
   is_default?: boolean;
+};
+
+type ChatMessage = {
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: Date;
 };
 
 type WardrobeItem = { 
@@ -81,6 +93,12 @@ export default function DailyOutfitRecommendation({
   const [recommendations, setRecommendations] = useState<Rec[]>([]);
   const [baseItemId, setBaseItemId] = useState<number | null>(null); 
   const [selectedPart, setSelectedPart] = useState<'full' | 'top' | 'bottom'>('full');
+  const [showChat, setShowChat] = useState(false);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatInput, setChatInput] = useState('');
+  const [chatLoading, setChatLoading] = useState(false);
+  const [chatRecommendations, setChatRecommendations] = useState<WardrobeItem[]>([]);
+
   
   const baseItem = useMemo(() => {
       if (baseItemId === null && wardrobeItems.length > 0) {
@@ -89,6 +107,7 @@ export default function DailyOutfitRecommendation({
       }
       return wardrobeItems.find(item => item.id === baseItemId) || null;
   }, [wardrobeItems, baseItemId]);
+  
 
   const occasions = [
     { id: 'daily', name: '데일리', icon: '☀️' },
@@ -136,14 +155,30 @@ export default function DailyOutfitRecommendation({
             
             const category = item.has_top ? '상의' : item.has_bottom ? '하의' : '';
             
-            // ✅ 파일명에서 이미지 URL 생성 (수정!)
-            const imageUrl = `${API_BASE_URL}/api/images/${item.image_path}`;
+            // ✅ 카테고리별 이미지 URL 생성 (수정!)
+            let imageUrl = '';
+            
+            console.log(`🖼️ Daily - 이미지 URL 생성 중 - item ${item.id}:`);
+            console.log(`  - image_path: ${item.image_path}`);
+            console.log(`  - image_category: ${item.image_category}`);
+            
+            if (item.image_category === 'original') {
+              imageUrl = `${API_BASE_URL}/api/images/${item.image_path}`;
+            } else if (item.image_category) {
+              // full, top, bottom, outer
+              imageUrl = `${API_BASE_URL}/api/processed-images/${item.image_category}/${item.image_path}`;
+            } else {
+              // 카테고리 정보가 없으면 원본 경로 사용
+              imageUrl = `${API_BASE_URL}/api/images/${item.image_path}`;
+            }
+            
+            console.log(`  ✅ 생성된 URL: ${imageUrl}`);
 
             return {
               id: item.id,
               name: name || '새 아이템',
               brand: 'My Wardrobe',
-              image: imageUrl,  // ✅ 전체 URL
+              image: imageUrl,
               category: category,
               loved: false,
               top_category: item.top_category,
@@ -261,6 +296,108 @@ export default function DailyOutfitRecommendation({
     }
   };
 
+  // 💬 LLM 채팅 메시지 전송
+  const sendChatMessage = async () => {
+    if (!chatInput.trim() || !userId) return;
+    
+    const userMessage = chatInput.trim();
+    setChatInput('');
+    
+    // 사용자 메시지 추가
+    const newUserMsg: ChatMessage = {
+      role: 'user',
+      content: userMessage,
+      timestamp: new Date()
+    };
+    setChatMessages(prev => [...prev, newUserMsg]);
+    
+    setChatLoading(true);
+    
+    try {
+      const formData = new FormData();
+      formData.append('user_id', String(userId));
+      formData.append('message', userMessage);
+      
+      const response = await fetch(`${API_BASE_URL}/api/chat/recommend`, {
+        method: 'POST',
+        body: formData,
+      });
+      
+      const data = await response.json();
+      
+      if (data.success) {
+        // AI 응답 추가
+        const aiMsg: ChatMessage = {
+          role: 'assistant',
+          content: data.response,
+          timestamp: new Date()
+        };
+        setChatMessages(prev => [...prev, aiMsg]);
+        
+        // 추천 아이템이 있으면 표시
+        if (data.recommendations && data.recommendations.length > 0) {
+          const items: WardrobeItem[] = data.recommendations.map((rec: any) => ({
+            id: rec.id,
+            name: rec.has_top 
+              ? `${rec.top_color || ''} ${rec.top_category || ''}`.trim()
+              : `${rec.bottom_color || ''} ${rec.bottom_category || ''}`.trim(),
+            brand: 'AI 추천',
+            image: `${API_BASE_URL}${rec.image}`,
+            category: rec.has_top ? '상의' : '하의',
+            loved: false,
+          }));
+          
+          setChatRecommendations(items);
+          
+          // 추천이 완료되면 알림
+          if (!data.need_more_info) {
+            Alert.alert(
+              '추천 완료! 🎉',
+              `${items.length}개의 아이템을 추천해드렸습니다. 아래에서 확인하세요!`
+            );
+          }
+        }
+        
+        console.log('✅ 채팅 응답:', data.response);
+        console.log('📦 컨텍스트:', data.context);
+        console.log('👕 추천 아이템:', data.recommendations?.length || 0);
+      } else {
+        Alert.alert('오류', data.message || '메시지 전송에 실패했습니다.');
+      }
+    } catch (error) {
+      console.error('❌ 채팅 오류:', error);
+      Alert.alert('네트워크 오류', '서버와 연결할 수 없습니다.');
+    } finally {
+      setChatLoading(false);
+    }
+  };
+
+  // 💬 채팅 초기화
+  const resetChat = async () => {
+    if (!userId) return;
+    
+    try {
+      const formData = new FormData();
+      formData.append('user_id', String(userId));
+      
+      const response = await fetch(`${API_BASE_URL}/api/chat/reset`, {
+        method: 'POST',
+        body: formData,
+      });
+      
+      const data = await response.json();
+      
+      if (data.success) {
+        setChatMessages([]);
+        setChatRecommendations([]);
+        Alert.alert('초기화 완료', '새로운 대화를 시작하세요!');
+      }
+    } catch (error) {
+      console.error('❌ 초기화 오류:', error);
+    }
+  };
+
+
   useEffect(() => {
     const loadUser = async () => {
       try {
@@ -295,11 +432,27 @@ export default function DailyOutfitRecommendation({
     onNavigate(screen as NavigationStep);
   };
 
+// ✅ HeaderRightAction 수정 (line ~260 근처)
   const HeaderRightAction = (
-    <Pressable onPress={onRefresh} style={[styles.refreshBtn, (loading || recommending || !baseItem) && styles.refreshBtnDisabled]} disabled={loading || recommending || !baseItem}>
-      {(loading || recommending) ? <ActivityIndicator color="#FFF" size="small" /> : <Zap size={16} color="#FFF" />}
-      <Text style={styles.refreshText}>{(loading || recommending) ? '처리중...' : 'AI 추천'}</Text>
-    </Pressable>
+    <View style={{ flexDirection: 'row', gap: 8 }}>
+      {/* 👇 채팅 버튼 추가 */}
+      <Pressable 
+        onPress={() => setShowChat(!showChat)} 
+        style={[styles.chatToggleBtn, showChat && styles.chatToggleBtnActive]}
+      >
+        {showChat ? <X size={16} color="#FFF" /> : <MessageCircle size={16} color="#FFF" />}
+      </Pressable>
+      
+      {/* 기존 AI 추천 버튼 */}
+      <Pressable 
+        onPress={onRefresh} 
+        style={[styles.refreshBtn, (loading || recommending || !baseItem) && styles.refreshBtnDisabled]} 
+        disabled={loading || recommending || !baseItem}
+      >
+        {(loading || recommending) ? <ActivityIndicator color="#FFF" size="small" /> : <Zap size={16} color="#FFF" />}
+        <Text style={styles.refreshText}>{(loading || recommending) ? '처리중...' : 'AI 추천'}</Text>
+      </Pressable>
+    </View>
   );
 
   return (
@@ -319,6 +472,87 @@ export default function DailyOutfitRecommendation({
           </Text>
         </View>
       )}
+
+      {/* 👇 채팅 모달 추가 */}
+      {showChat && (
+        <KeyboardAvoidingView 
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.chatModal}
+        >
+          <View style={styles.chatContainer}>
+            {/* 채팅 헤더 */}
+            <View style={styles.chatHeader}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <MessageCircle size={20} color="#111" />
+                <Text style={styles.chatHeaderTitle}>AI 스타일리스트와 대화</Text>
+              </View>
+              <Pressable onPress={resetChat}>
+                <Text style={styles.chatResetBtn}>초기화</Text>
+              </Pressable>
+            </View>
+
+            {/* 채팅 메시지 */}
+            <ScrollView 
+              style={styles.chatMessages}
+              contentContainerStyle={{ padding: 12, gap: 12 }}
+            >
+              {chatMessages.length === 0 ? (
+                <View style={styles.chatEmptyState}>
+                  <Text style={styles.chatEmptyText}>
+                    안녕하세요! 😊{'\n\n'}
+                    오늘 어떤 옷을 입을지 고민이시라면{'\n'}
+                    편하게 물어보세요!{'\n\n'}
+                    예: "오늘 회사 가는데 좀 추워요"
+                  </Text>
+                </View>
+              ) : (
+                chatMessages.map((msg, index) => (
+                  <View 
+                    key={index}
+                    style={[
+                      styles.chatBubble,
+                      msg.role === 'user' ? styles.chatBubbleUser : styles.chatBubbleAI
+                    ]}
+                  >
+                    <Text style={[
+                      styles.chatBubbleText,
+                      msg.role === 'user' && styles.chatBubbleTextUser
+                    ]}>
+                      {msg.content}
+                    </Text>
+                  </View>
+                ))
+              )}
+              
+              {chatLoading && (
+                <View style={[styles.chatBubble, styles.chatBubbleAI]}>
+                  <ActivityIndicator size="small" color="#666" />
+                </View>
+              )}
+            </ScrollView>
+
+            {/* 채팅 입력창 */}
+            <View style={styles.chatInputContainer}>
+              <TextInput
+                style={styles.chatInput}
+                placeholder="메시지를 입력하세요..."
+                value={chatInput}
+                onChangeText={setChatInput}
+                onSubmitEditing={sendChatMessage}
+                editable={!chatLoading}
+              />
+              <Pressable 
+                onPress={sendChatMessage}
+                style={[styles.chatSendBtn, (!chatInput.trim() || chatLoading) && styles.chatSendBtnDisabled]}
+                disabled={!chatInput.trim() || chatLoading}
+              >
+                <Send size={18} color="#FFF" />
+              </Pressable>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      )}
+
 
       <ScrollView contentContainerStyle={styles.screenPad}>
         
@@ -487,6 +721,40 @@ export default function DailyOutfitRecommendation({
             ))}
           </View>
         </View>
+
+        {/* 👇 채팅 추천 결과 섹션 추가 (E. 추천 결과 목록 위에) */}
+        {chatRecommendations.length > 0 && (
+          <View>
+            <Text style={styles.sectionTitle}>💬 대화 기반 AI 추천</Text>
+            <View style={{ gap: 16, marginTop: 16 }}>
+              {chatRecommendations.map((item, index) => (
+                <View key={item.id} style={styles.cardRow}>
+                  <View style={styles.thumbBig}>
+                    <Image 
+                      source={{ uri: item.image }} 
+                      style={[styles.thumbImg, { width: 96, height: 140 }]}
+                      resizeMode="cover"
+                    />
+                    <View style={styles.bestBadge}>
+                      <Text style={styles.bestBadgeText}>
+                        {index === 0 ? 'BEST' : `No.${index + 1}`}
+                      </Text>
+                    </View>
+                  </View>
+                  <View style={{ flex: 1, padding: 12, justifyContent: 'space-between' }}>
+                    <View>
+                      <Text style={styles.cardTitle}>{item.name}</Text>
+                      <Text style={styles.reason}>대화를 통해 추천된 아이템입니다</Text>
+                    </View>
+                    <Pressable style={[styles.btn, styles.btnPrimary]}>
+                      <Text style={styles.btnPrimaryText}>코디 보기</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              ))}
+            </View>
+          </View>
+        )}
 
         {/* E. 추천 결과 목록 */}
         <View>
@@ -830,5 +1098,126 @@ const styles = StyleSheet.create({
   },
   partTextActive: {
     color: '#111',
+  },
+    // 👇 채팅 관련 스타일 추가
+  chatToggleBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    backgroundColor: '#111111',
+    borderRadius: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 36,
+    height: 36,
+  },
+  chatToggleBtnActive: {
+    backgroundColor: '#EF4444',
+  },
+  chatModal: {
+    position: 'absolute',
+    top: APP_HEADER_HEIGHT,
+    left: 0,
+    right: 0,
+    bottom: BOTTOM_NAV_HEIGHT,
+    zIndex: 100,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  },
+  chatContainer: {
+    flex: 1,
+    backgroundColor: '#FFF',
+    margin: 16,
+    borderRadius: 16,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOpacity: 0.3,
+    shadowRadius: 20,
+    elevation: 10,
+  },
+  chatHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E7EB',
+    backgroundColor: '#F9FAFB',
+  },
+  chatHeaderTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#111',
+  },
+  chatResetBtn: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#EF4444',
+  },
+  chatMessages: {
+    flex: 1,
+    backgroundColor: '#FFF',
+  },
+  chatEmptyState: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 40,
+  },
+  chatEmptyText: {
+    fontSize: 14,
+    color: '#6B7280',
+    textAlign: 'center',
+    lineHeight: 22,
+  },
+  chatBubble: {
+    maxWidth: '80%',
+    padding: 12,
+    borderRadius: 12,
+    marginBottom: 8,
+  },
+  chatBubbleUser: {
+    alignSelf: 'flex-end',
+    backgroundColor: '#111',
+  },
+  chatBubbleAI: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#F3F4F6',
+  },
+  chatBubbleText: {
+    fontSize: 14,
+    color: '#111',
+    lineHeight: 20,
+  },
+  chatBubbleTextUser: {
+    color: '#FFF',
+  },
+  chatInputContainer: {
+    flexDirection: 'row',
+    padding: 12,
+    gap: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#E5E7EB',
+    backgroundColor: '#FFF',
+  },
+  chatInput: {
+    flex: 1,
+    backgroundColor: '#F9FAFB',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    fontSize: 14,
+  },
+  chatSendBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#111',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  chatSendBtnDisabled: {
+    opacity: 0.5,
   },
 });
