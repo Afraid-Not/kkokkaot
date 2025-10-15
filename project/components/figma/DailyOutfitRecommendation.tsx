@@ -23,12 +23,10 @@ import AppHeader from '../common/AppHeader';
 import BottomNavBar from '../common/BottomNavBar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-// 🌐 API 주소는 WardrobeManagement와 동일하게 사용
 const API_BASE_URL = 'https://loyd-extemporaneous-annalise.ngrok-free.dev';
-const APP_HEADER_HEIGHT = 56; // AppHeader의 예상 높이 (Safe Area 미포함)
-const BOTTOM_NAV_HEIGHT = 80; // BottomNavBar의 예상 높이
+const APP_HEADER_HEIGHT = 56;
+const BOTTOM_NAV_HEIGHT = 80;
 
-// 네비게이션 타입을 정의합니다. (App.tsx의 MainScreen 타입과 일치해야 함)
 type NavigationStep =
   | 'home'
   | 'today-curation'
@@ -47,10 +45,9 @@ type Rec = {
   items: string[];
   score: number;
   reason: string;
-  is_default?: boolean;  // ✅ 추가
+  is_default?: boolean;
 };
 
-// 옷장 아이템 타입 (WardrobeManagement.tsx에서 복사)
 type WardrobeItem = { 
   id: number; 
   name: string; 
@@ -60,13 +57,13 @@ type WardrobeItem = {
   loved: boolean;
   top_category?: string;
   bottom_category?: string;
-  // ✅ 이 3줄만 추가!
   top_image?: string;
   bottom_image?: string;
   has_top?: boolean;
   has_bottom?: boolean;
 };
 
+// ✅ 코드 변경 강제 트리거 - v2.0
 export default function DailyOutfitRecommendation({
   onBack,
   onNavigate,
@@ -82,20 +79,16 @@ export default function DailyOutfitRecommendation({
   const [userId, setUserId] = useState<number | null>(null);
   const [wardrobeItems, setWardrobeItems] = useState<WardrobeItem[]>([]);
   const [recommendations, setRecommendations] = useState<Rec[]>([]);
-  // ✅ [추가] 추천의 기준이 될 아이템 ID
   const [baseItemId, setBaseItemId] = useState<number | null>(null); 
   const [selectedPart, setSelectedPart] = useState<'full' | 'top' | 'bottom'>('full');
   
-  // 현재 선택된 기준 아이템 정보를 찾습니다.
   const baseItem = useMemo(() => {
-      // baseItemId가 null이고 옷장 아이템이 로드되면, 첫 번째 아이템을 자동으로 설정
       if (baseItemId === null && wardrobeItems.length > 0) {
           setBaseItemId(wardrobeItems[0].id);
           return wardrobeItems[0];
       }
       return wardrobeItems.find(item => item.id === baseItemId) || null;
   }, [wardrobeItems, baseItemId]);
-
 
   const occasions = [
     { id: 'daily', name: '데일리', icon: '☀️' },
@@ -105,7 +98,6 @@ export default function DailyOutfitRecommendation({
     { id: 'casual', name: '캐주얼', icon: '👕' },
     { id: 'formal', name: '포멀', icon: '👔' },
   ] as const;
-
 
   const avgScore =
     recommendations.length > 0
@@ -119,13 +111,12 @@ export default function DailyOutfitRecommendation({
     return d.toLocaleDateString('ko-KR', { month: 'long', day: 'numeric' });
   }, []);
 
-  // 📥 옷장 데이터 불러오기
+  // 옷장 데이터 불러오기
   const fetchWardrobe = useCallback(async (id: number) => {
     try {
       const url = `${API_BASE_URL}/api/wardrobe/${id}`;
       const response = await fetch(url);
       
-      // ✅ [방어 로직 1] 200이 아니거나 JSON이 아니면 오류 처리
       const contentType = response.headers.get('content-type');
       if (response.status !== 200 || !contentType || !contentType.includes('application/json')) {
         console.error(`❌ 옷장 조회 실패: 상태 코드 ${response.status}`);
@@ -144,19 +135,19 @@ export default function DailyOutfitRecommendation({
                       item.has_bottom ? `${item.bottom_color || ''} ${item.bottom_category}`.trim() : '새 아이템';
             
             const category = item.has_top ? '상의' : item.has_bottom ? '하의' : '';
-            const filename = item.image_path.split(/\\|\//).pop();
-            const imageUrl = `${API_BASE_URL}/api/images/${filename}`;
+            
+            // ✅ 파일명에서 이미지 URL 생성 (수정!)
+            const imageUrl = `${API_BASE_URL}/api/images/${item.image_path}`;
 
             return {
               id: item.id,
               name: name || '새 아이템',
               brand: 'My Wardrobe',
-              image: imageUrl,
+              image: imageUrl,  // ✅ 전체 URL
               category: category,
               loved: false,
               top_category: item.top_category,
               bottom_category: item.bottom_category,
-              // ✅ 이 4줄만 추가!
               top_image: item.top_image ? `${API_BASE_URL}${item.top_image}` : undefined,
               bottom_image: item.bottom_image ? `${API_BASE_URL}${item.bottom_image}` : undefined,
               has_top: item.has_top,
@@ -165,7 +156,6 @@ export default function DailyOutfitRecommendation({
         });
         setWardrobeItems(loadedItems);
         
-        // 아이템 로드 후 baseItemId가 설정되지 않았다면 첫 번째 아이템으로 설정
         if (loadedItems.length > 0 && baseItemId === null) {
             setBaseItemId(loadedItems[0].id);
         }
@@ -179,7 +169,7 @@ export default function DailyOutfitRecommendation({
   }, [baseItemId]); 
 
   
-  // ✨ AI 추천 요청
+  // ✨ AI 추천 요청 (수정: 상의/하의 분리 추천 지원)
   const fetchRecommendation = async () => {
     if (!baseItem) {
       Alert.alert('알림', '추천 기준이 될 아이템을 먼저 선택해주세요.');
@@ -187,15 +177,26 @@ export default function DailyOutfitRecommendation({
     }
     
     setRecommending(true);
-    const itemToRecommend = baseItem;
 
     try {
-      const url = `${API_BASE_URL}/api/recommendations/similar/${itemToRecommend.id}?n_results=3&user_id=${userId}`;
+      // ✅ selectedPart에 따라 다른 엔드포인트 호출
+      let url = '';
+      
+      if (selectedPart === 'full') {
+        // 전체 코디 유사 추천 (기존 로직)
+        url = `${API_BASE_URL}/api/recommendations/similar/${baseItem.id}?n_results=3&user_id=${userId}`;
+      } else if (selectedPart === 'top') {
+        // 이 상의와 어울리는 하의 추천
+        url = `${API_BASE_URL}/api/recommendations/match-bottom/${baseItem.id}?n_results=3&user_id=${userId}`;
+      } else if (selectedPart === 'bottom') {
+        // 이 하의와 어울리는 상의 추천
+        url = `${API_BASE_URL}/api/recommendations/match-top/${baseItem.id}?n_results=3&user_id=${userId}`;
+      }
+      
       console.log(`\n✨ 추천 요청 URL: ${url}`);
       
       const response = await fetch(url);
       
-      // ✅ [방어 로직 2] 200이 아니거나 JSON이 아니면 오류 처리
       const contentType = response.headers.get('content-type');
       if (response.status !== 200 || !contentType || !contentType.includes('application/json')) {
         console.error(`❌ 추천 요청 실패: 상태 코드 ${response.status}`);
@@ -209,27 +210,44 @@ export default function DailyOutfitRecommendation({
       const data = await response.json();
 
       if (data.success && data.recommendations) {
-        const recs: Rec[] = data.recommendations.map((rec: any, index: number) => ({
-          id: rec.id,
-          image: `${API_BASE_URL}/api/images/${rec.image_path.split(/\\|\//).pop()}`, 
-          title: `${itemToRecommend.name} 아이템과 유사`,
-          items: [rec.name, rec.category],
-          score: Math.round((1.0 - rec.distance) * 100), 
-          reason: `유사도 점수: ${(1.0 - rec.distance).toFixed(2)}`,
-          is_default: rec.is_default || false,  // ✅ 추가
-        }));
+        // ✅ 이미지 URL 생성 + 디버깅
+        const recs: Rec[] = data.recommendations.map((rec: any, index: number) => {
+          const imageUrl = `${API_BASE_URL}/api/images/${rec.image_path}`;
+          
+          console.log(`\n📸 추천 아이템 ${index + 1}:`);
+          console.log(`  - ID: ${rec.id}`);
+          console.log(`  - image_path (from server): ${rec.image_path}`);
+          console.log(`  - imageUrl (generated): ${imageUrl}`);
+          console.log(`  - name: ${rec.name}`);
+          console.log(`  - category: ${rec.category}`);
+          
+          return {
+            id: rec.id,
+            image: imageUrl,
+            title: selectedPart === 'full' 
+              ? `${baseItem.name} 아이템과 유사`
+              : selectedPart === 'top'
+              ? `${baseItem.name}와 어울리는 하의`
+              : `${baseItem.name}와 어울리는 상의`,
+            items: [rec.name, rec.category],
+            score: Math.round((1.0 - rec.distance) * 100), 
+            reason: `유사도 점수: ${(1.0 - rec.distance).toFixed(2)}`,
+            is_default: rec.is_default || false,
+          };
+        });
         
         setRecommendations(recs);
         
-        // ✅ 기본 아이템 포함 여부 안내
         const hasDefaultItems = recs.some(r => r.is_default);
+        const recommendType = selectedPart === 'full' ? '유사한' : '어울리는';
+        
         if (hasDefaultItems) {
           Alert.alert(
             '추천 완료',
-            `${itemToRecommend.name}와 유사한 아이템 ${recs.length}개를 찾았습니다.\n\n일부 기본 추천 아이템이 포함되었습니다.`
+            `${baseItem.name}와 ${recommendType} 아이템 ${recs.length}개를 찾았습니다.\n\n일부 기본 추천 아이템이 포함되었습니다.`
           );
         } else {
-          Alert.alert('추천 완료', `${itemToRecommend.name}와 유사한 아이템 ${recs.length}개를 찾았습니다.`);
+          Alert.alert('추천 완료', `${baseItem.name}와 ${recommendType} 아이템 ${recs.length}개를 찾았습니다.`);
         }
       } else {
         Alert.alert('추천 실패', data.detail || '추천 목록을 가져오지 못했습니다.');
@@ -243,8 +261,6 @@ export default function DailyOutfitRecommendation({
     }
   };
 
-
-  // 🔑 사용자 정보 로드 및 초기 데이터 fetch
   useEffect(() => {
     const loadUser = async () => {
       try {
@@ -265,15 +281,13 @@ export default function DailyOutfitRecommendation({
     loadUser();
   }, [fetchWardrobe]);
   
-  // 새로 추천 버튼 클릭 시
   async function onRefresh() {
     await fetchRecommendation();
   }
 
-  // BottomNavBar의 screen 이름을 NavigationStep으로 매핑하는 함수를 추가합니다.
   const handleNavigation = (screen: string) => {
     console.log('========================================');
-    console.log('🔔 네비게이션 클릭!');
+    console.log('📢 네비게이션 클릭!');
     console.log('전달받은 screen 값:', screen);
     console.log('screen 타입:', typeof screen);
     console.log('========================================');
@@ -308,7 +322,7 @@ export default function DailyOutfitRecommendation({
 
       <ScrollView contentContainerStyle={styles.screenPad}>
         
-        {/* A. 현재 날씨 카드 (임시 데이터) */}
+        {/* A. 현재 날씨 카드 */}
         <View style={styles.weatherCard}>
           <View style={styles.weatherLeft}>
             <View style={styles.weatherIcon}>
@@ -352,7 +366,6 @@ export default function DailyOutfitRecommendation({
                         {wardrobeItems.map((item) => (
                             <Pressable 
                                 key={item.id} 
-                                // ✅ 아이템 선택 시 baseItemId 변경 및 추천 목록 초기화
                                 onPress={() => { setBaseItemId(item.id); setRecommendations([]); }} 
                                 style={[styles.baseItemCard, item.id === baseItemId && styles.baseItemCardActive]}
                                 disabled={loading || recommending}
@@ -379,7 +392,6 @@ export default function DailyOutfitRecommendation({
             </Text>
             
             <View style={styles.partSelector}>
-              {/* 전체 */}
               <Pressable 
                 style={[
                   styles.partCard,
@@ -400,7 +412,6 @@ export default function DailyOutfitRecommendation({
                 </Text>
               </Pressable>
               
-              {/* 상의 */}
               {baseItem.has_top && baseItem.top_image && (
                 <Pressable 
                   style={[
@@ -423,7 +434,6 @@ export default function DailyOutfitRecommendation({
                 </Pressable>
               )}
               
-              {/* 하의 */}
               {baseItem.has_bottom && baseItem.bottom_image && (
                 <Pressable 
                   style={[
@@ -449,7 +459,7 @@ export default function DailyOutfitRecommendation({
           </View>
         )}
         
-        {/* C. 상황별 선택 그리드 */}
+        {/* D. 상황별 선택 */}
         <View>
           <Text style={styles.sectionTitle}>추천 상황 선택</Text>
           <View style={[styles.occGrid, { marginTop: 12 }]}>
@@ -478,7 +488,7 @@ export default function DailyOutfitRecommendation({
           </View>
         </View>
 
-        {/* D. 추천 결과 목록 */}
+        {/* E. 추천 결과 목록 */}
         <View>
           <View style={styles.rowBetween}>
             <Text style={styles.sectionTitle}>
@@ -494,22 +504,35 @@ export default function DailyOutfitRecommendation({
           </View>
           
           {wardrobeItems.length === 0 ? (
-            // 아이템이 아예 없을 때
             <View style={styles.emptyArea}>
                 <Text style={styles.emptyText}>아이템이 없어서 추천을 할 수 없습니다.</Text>
             </View>
           ) : recommendations.length === 0 && !recommending ? (
-             // 아이템은 있으나 추천 전일 때
              <View style={styles.emptyArea}>
                 <Text style={styles.emptyText}>기준 아이템을 선택하고 'AI 추천' 버튼을 눌러보세요.</Text>
             </View>
           ) : (
-            // 추천 결과가 있을 때
             <View style={{ gap: 16, marginTop: 16 }}>
               {recommendations.map((rec, index) => (
                 <View key={rec.id} style={styles.cardRow}>
                   <View style={styles.thumbBig}>
-                    <Image source={{ uri: rec.image }} style={styles.thumbImg} />
+                    <Image 
+                      source={{ uri: rec.image }} 
+                      style={[styles.thumbImg, { width: 96, height: 140 }]}  // ✅ 명시적 크기 추가
+                      resizeMode="cover"
+                      onError={(e) => {
+                        console.error('❌ 이미지 로드 실패:', rec.image);
+                        console.error('에러:', e.nativeEvent.error);
+                        console.error('추천 아이템 전체 데이터:', JSON.stringify(rec, null, 2));
+                      }}
+                      onLoad={() => {
+                        console.log('✅ 이미지 로드 성공:', rec.image);
+                      }}
+                    />
+                    {/* 이미지 로드 실패 시 표시할 텍스트 */}
+                    <View style={styles.imageLoadingOverlay}>
+                      <Text style={styles.imageLoadingText}>📸</Text>
+                    </View>
                     <View style={styles.bestBadge}>
                         <Text style={styles.bestBadgeText}>
                             {index === 0 ? 'BEST MATCH' : `No.${index + 1}`}
@@ -548,9 +571,8 @@ export default function DailyOutfitRecommendation({
         </View>
       </ScrollView>
 
-      {/* BottomNavBar는 SafeAreaView 직계 자식으로 그대로 둡니다. */}
       <BottomNavBar 
-        activeScreen="style-analysis"  // ✅ 수정!
+        activeScreen="style-analysis"
         onNavigate={handleNavigation} 
       />
     </SafeAreaView>
@@ -559,11 +581,10 @@ export default function DailyOutfitRecommendation({
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#FFFFFF' },
-  // ✅ [수정] 오버레이 스타일: 네비게이션 바를 막지 않도록 bottom 조정
   overlay: {
     ...StyleSheet.absoluteFillObject,
-    top: APP_HEADER_HEIGHT, // AppHeader 아래부터 시작
-    bottom: 0, // 네비게이션 바를 덮도록 전체를 덮음 (zIndex로 해결)
+    top: APP_HEADER_HEIGHT,
+    bottom: 0,
     backgroundColor: 'rgba(0, 0, 0, 0.4)',
     zIndex: 99, 
     justifyContent: 'center',
@@ -593,7 +614,6 @@ const styles = StyleSheet.create({
     position: 'relative'
   },
   
-  // ✅ [추가] 기준 아이템 목록 스타일
   baseItemInfo: { 
       backgroundColor: '#F3F4F6', 
       padding: 12, 
@@ -619,7 +639,7 @@ const styles = StyleSheet.create({
       borderColor: 'transparent',
   },
   baseItemCardActive: {
-      borderColor: '#111', // 선택 시 진하게 표시
+      borderColor: '#111',
   },
   baseItemImg: {
       ...StyleSheet.absoluteFillObject,
@@ -638,7 +658,6 @@ const styles = StyleSheet.create({
       fontWeight: '600',
   },
   
-  // 로딩/빈 영역 스타일
   loadingArea: { paddingVertical: 40, alignItems: 'center' },
   loadingText: { marginTop: 16, color: '#666' },
   emptyArea: { paddingVertical: 20, alignItems: 'center' },
@@ -684,7 +703,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     gap: 6,
   },
-  // ✅ [추가] 로딩 중 버튼 스타일
   occBtnDisabled: {
       opacity: 0.5
   },
@@ -707,6 +725,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     overflow: 'hidden',
     flexDirection: 'row',
+    minHeight: 140,  // ✅ 최소 높이 추가
     elevation: 2,
     shadowColor: '#000',
     shadowOpacity: 0.06,
@@ -715,8 +734,28 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: '#F3F4F6'
   },
-  thumbBig: { width: 96, height: 'auto', backgroundColor: '#EEE' },
-  thumbImg: { width: '100%', height: '100%', resizeMode: 'cover' },
+  thumbBig: { 
+    width: 96, 
+    height: 140,  // ✅ 'auto'에서 고정 높이로 변경
+    backgroundColor: '#EEE',
+    overflow: 'hidden',
+  },
+  thumbImg: { 
+    width: '100%', 
+    height: '100%', 
+    resizeMode: 'cover' 
+  },
+  imageLoadingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: '#F3F4F6',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: -1,
+  },
+  imageLoadingText: {
+    fontSize: 32,
+    opacity: 0.3,
+  },
   bestBadge: {
     position: 'absolute',
     top: 6,

@@ -609,7 +609,7 @@ def get_similar_recommendations(
                 
                 rec_user_id, image_path, is_default, top_cat, top_color, bottom_cat, bottom_color = details
                 
-                # ✅ 파일명만 추출 (추가!)
+                # ✅ 파일명만 추출
                 filename = Path(image_path).name
                 
                 # 아이템 이름 생성
@@ -646,11 +646,11 @@ def get_similar_recommendations(
         print(f"✅ AI 추천 완료: {len(recommendations)}개 아이템")
         print(f"  - 사용자 아이템: {len(user_recs)}개")
         print(f"  - 기본 아이템: {len(default_recs)}개")
-
-        # ✅ 디버깅: 실제 응답 데이터 출력 (추가!)
+        
+        # ✅ 디버깅: 실제 응답 데이터 출력
         print(f"\n📦 응답 데이터:")
         for rec in recommendations:
-            print(f"  - id: {rec['id']}, image_path: {rec['image_path']}")
+            print(f"  - id: {rec['id']}, image_path: {rec['image_path']}, name: {rec['name']}")
 
         print(f"{'='*60}\n")
 
@@ -669,7 +669,276 @@ def get_similar_recommendations(
             status_code=500, 
             detail=f"AI 추천 오류: {str(e)}"
         )
+
+
+# ✅ 이 상의와 어울리는 하의 추천
+@app.get("/api/recommendations/match-bottom/{item_id}")
+def get_matching_bottom(
+    item_id: int, 
+    n_results: int = 3,
+    user_id: int = None
+):
+    """상의 기준으로 어울리는 하의 추천"""
+    
+    print(f"\n{'='*60}")
+    print(f"🤖 하의 매칭 추천 (기준 상의 ID: {item_id})")
+    print(f"  - 추천 개수: {n_results}")
+    print(f"  - 사용자 ID: {user_id}")
+    print(f"{'='*60}")
+    
+    if not pipeline or not pipeline.chroma_collection:
+        print("❌ AI 파이프라인 또는 ChromaDB 비활성화")
+        raise HTTPException(
+            status_code=503, 
+            detail="AI 추천 기능을 사용할 수 없습니다."
+        )
+    
+    try:
+        # 1. 기준 아이템 정보 가져오기
+        with pipeline.db_conn.cursor() as cur:
+            cur.execute("""
+                SELECT 
+                    w.original_image_path, 
+                    w.user_id,
+                    w.has_top,
+                    t.category as top_category,
+                    t.color as top_color
+                FROM wardrobe_items w
+                LEFT JOIN top_attributes t ON w.item_id = t.item_id
+                WHERE w.item_id = %s
+            """, (item_id,))
+            
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(
+                    status_code=404, 
+                    detail="기준 아이템을 찾을 수 없습니다."
+                )
+            
+            base_image_path, base_user_id, has_top, top_cat, top_color = row
+            
+            # 상의가 없으면 에러
+            if not has_top:
+                raise HTTPException(
+                    status_code=400,
+                    detail="이 아이템은 상의가 없어서 하의 매칭을 할 수 없습니다."
+                )
         
+        # 2. 전체 유사 아이템 검색 (더 많이 가져오기)
+        results = pipeline.get_similar_items(
+            image_path=base_image_path,
+            n_results=n_results * 5  # 필터링을 위해 많이 가져옴
+        )
+        
+        # 3. 하의만 필터링
+        user_bottoms = []
+        default_bottoms = []
+        
+        for rec in results:
+            if rec['item_id'] == item_id:
+                continue
+            
+            with pipeline.db_conn.cursor() as cur:
+                cur.execute("""
+                    SELECT 
+                        w.user_id,
+                        w.original_image_path,
+                        w.is_default,
+                        w.has_bottom,
+                        b.category as bottom_category,
+                        b.color as bottom_color
+                    FROM wardrobe_items w
+                    LEFT JOIN bottom_attributes b ON w.item_id = b.item_id
+                    WHERE w.item_id = %s AND w.has_bottom = TRUE
+                """, (rec['item_id'],))
+                
+                details = cur.fetchone()
+                if not details:
+                    continue
+                
+                rec_user_id, image_path, is_default, has_bottom, bottom_cat, bottom_color = details
+                
+                # 파일명만 추출
+                filename = Path(image_path).name
+                
+                # 아이템 이름 생성
+                name = f"{bottom_color or ''} {bottom_cat}".strip() if bottom_cat else '하의'
+                
+                rec_data = {
+                    'id': rec['item_id'],
+                    'image_path': filename,
+                    'distance': rec['distance'],
+                    'name': name,
+                    'category': bottom_cat or '하의',
+                    'is_default': is_default,
+                }
+                
+                # 우선순위 분류
+                if user_id and rec_user_id == user_id:
+                    user_bottoms.append(rec_data)
+                elif rec_user_id == 0:
+                    default_bottoms.append(rec_data)
+        
+        # 4. 사용자 아이템 우선, 부족하면 기본 아이템 추가
+        recommendations = user_bottoms[:n_results]
+
+        if len(recommendations) < n_results:
+            needed = n_results - len(recommendations)
+            recommendations.extend(default_bottoms[:needed])
+
+        print(f"✅ 하의 매칭 추천 완료: {len(recommendations)}개")
+        print(f"  - 사용자 하의: {len(user_bottoms)}개")
+        print(f"  - 기본 하의: {len(default_bottoms)}개")
+        print(f"{'='*60}\n")
+
+        return {
+            "success": True,
+            "recommendations": recommendations,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ 하의 매칭 추천 중 오류 발생: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=500, 
+            detail=f"AI 추천 오류: {str(e)}"
+        )
+
+
+# ✅ 이 하의와 어울리는 상의 추천
+@app.get("/api/recommendations/match-top/{item_id}")
+def get_matching_top(
+    item_id: int, 
+    n_results: int = 3,
+    user_id: int = None
+):
+    """하의 기준으로 어울리는 상의 추천"""
+    
+    print(f"\n{'='*60}")
+    print(f"🤖 상의 매칭 추천 (기준 하의 ID: {item_id})")
+    print(f"  - 추천 개수: {n_results}")
+    print(f"  - 사용자 ID: {user_id}")
+    print(f"{'='*60}")
+    
+    if not pipeline or not pipeline.chroma_collection:
+        print("❌ AI 파이프라인 또는 ChromaDB 비활성화")
+        raise HTTPException(
+            status_code=503, 
+            detail="AI 추천 기능을 사용할 수 없습니다."
+        )
+    
+    try:
+        # 1. 기준 아이템 정보 가져오기
+        with pipeline.db_conn.cursor() as cur:
+            cur.execute("""
+                SELECT 
+                    w.original_image_path, 
+                    w.user_id,
+                    w.has_bottom,
+                    b.category as bottom_category,
+                    b.color as bottom_color
+                FROM wardrobe_items w
+                LEFT JOIN bottom_attributes b ON w.item_id = b.item_id
+                WHERE w.item_id = %s
+            """, (item_id,))
+            
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(
+                    status_code=404, 
+                    detail="기준 아이템을 찾을 수 없습니다."
+                )
+            
+            base_image_path, base_user_id, has_bottom, bottom_cat, bottom_color = row
+            
+            # 하의가 없으면 에러
+            if not has_bottom:
+                raise HTTPException(
+                    status_code=400,
+                    detail="이 아이템은 하의가 없어서 상의 매칭을 할 수 없습니다."
+                )
+        
+        # 2. 전체 유사 아이템 검색
+        results = pipeline.get_similar_items(
+            image_path=base_image_path,
+            n_results=n_results * 5
+        )
+        
+        # 3. 상의만 필터링
+        user_tops = []
+        default_tops = []
+        
+        for rec in results:
+            if rec['item_id'] == item_id:
+                continue
+            
+            with pipeline.db_conn.cursor() as cur:
+                cur.execute("""
+                    SELECT 
+                        w.user_id,
+                        w.original_image_path,
+                        w.is_default,
+                        w.has_top,
+                        t.category as top_category,
+                        t.color as top_color
+                    FROM wardrobe_items w
+                    LEFT JOIN top_attributes t ON w.item_id = t.item_id
+                    WHERE w.item_id = %s AND w.has_top = TRUE
+                """, (rec['item_id'],))
+                
+                details = cur.fetchone()
+                if not details:
+                    continue
+                
+                rec_user_id, image_path, is_default, has_top, top_cat, top_color = details
+                
+                filename = Path(image_path).name
+                name = f"{top_color or ''} {top_cat}".strip() if top_cat else '상의'
+                
+                rec_data = {
+                    'id': rec['item_id'],
+                    'image_path': filename,
+                    'distance': rec['distance'],
+                    'name': name,
+                    'category': top_cat or '상의',
+                    'is_default': is_default,
+                }
+                
+                if user_id and rec_user_id == user_id:
+                    user_tops.append(rec_data)
+                elif rec_user_id == 0:
+                    default_tops.append(rec_data)
+        
+        # 4. 우선순위 정렬
+        recommendations = user_tops[:n_results]
+
+        if len(recommendations) < n_results:
+            needed = n_results - len(recommendations)
+            recommendations.extend(default_tops[:needed])
+
+        print(f"✅ 상의 매칭 추천 완료: {len(recommendations)}개")
+        print(f"  - 사용자 상의: {len(user_tops)}개")
+        print(f"  - 기본 상의: {len(default_tops)}개")
+        print(f"{'='*60}\n")
+
+        return {
+            "success": True,
+            "recommendations": recommendations,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ 상의 매칭 추천 중 오류 발생: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=500, 
+            detail=f"AI 추천 오류: {str(e)}"
+        )
 
 @app.get("/api/wardrobe/item/{item_id}")
 def get_item_detail(item_id: int):
