@@ -142,10 +142,33 @@ export default function HomeScreen({
                     </Pressable>
                 </View>
                 <View style={styles.menuBody}>
-                    <Pressable style={styles.menuRow}><UserIcon size={20} color="#4B5563"/><Text style={styles.menuText}>내 정보</Text></Pressable>
-                    <Pressable style={styles.menuRow}><Settings size={20} color="#4B5563"/><Text style={styles.menuText}>설정</Text></Pressable>
-                    <Pressable style={styles.menuRow}><Bell size={20} color="#4B5563"/><Text style={styles.menuText}>알림</Text></Pressable>
-                    <Pressable style={styles.menuRow}><HelpCircle size={20} color="#4B5563"/><Text style={styles.menuText}>고객센터</Text></Pressable>
+                  <Pressable
+                    style={styles.menuRow}
+                    onPress={() => { setMenuOpen(false); onNavigate('myinfo'); }}>
+                    <UserIcon size={20} color="#4B5563"/>
+                    <Text style={styles.menuText}>내 정보</Text>
+                  </Pressable>
+
+                  <Pressable
+                    style={styles.menuRow}
+                    onPress={() => { setMenuOpen(false); onNavigate('settings'); }}>
+                    <Settings size={20} color="#4B5563"/>
+                    <Text style={styles.menuText}>설정</Text>
+                  </Pressable>
+
+                  <Pressable
+                    style={styles.menuRow}
+                    onPress={() => { setMenuOpen(false); onNavigate('notifications'); }}>
+                    <Bell size={20} color="#4B5563"/>
+                    <Text style={styles.menuText}>알림</Text>
+                  </Pressable>
+
+                  <Pressable
+                    style={styles.menuRow}
+                    onPress={() => { setMenuOpen(false); onNavigate('support'); }}>
+                    <HelpCircle size={20} color="#4B5563"/>
+                    <Text style={styles.menuText}>고객센터</Text>
+                  </Pressable>
                 </View>
                 <Pressable style={styles.logoutBtn} onPress={onLogout}>
                     <LogOut size={20} color="#DC2626"/>

@@ -13,6 +13,11 @@ import TodayCurationDetail from './components/figma/TodayCurationDetail';
 import WardrobeManagement from './components/figma/WardrobeManagement';
 import SignupScreen from './components/figma/SignupScreen';
 import LoginScreen from './components/figma/LoginScreen';
+import MyInfoScreen from './components/figma/MyInfoScreen';
+import SettingsScreen from './components/figma/SettingsScreen';
+import NotificationsScreen from './components/figma/NotificationsScreen';
+import SupportScreen from './components/figma/SupportScreen';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export type MainScreen =
   | 'home'
@@ -23,7 +28,11 @@ export type MainScreen =
   | 'today-curation'
   | 'daily-outfit'
   | 'recent-styling'
-  | 'blocked-outfits';
+  | 'blocked-outfits'
+  | 'myinfo'
+  | 'settings'
+  | 'notifications'
+  | 'support';
 
 type Screen =
   | 'splash'
@@ -47,8 +56,13 @@ export default function App() {
     setMainScreen(target);
   };
 
-  const handleLoginSuccess = (name: string) => {
+  const handleLoginSuccess = async (name: string) => {
     setUserName(name);
+    // 최소 프로필을 저장 (나중에 서버 응답으로 교체 가능)
+    await AsyncStorage.setItem(
+      '@kko/user',
+      JSON.stringify({ id: 'local-user', name, email: `${name}@local` })
+    );
     setScreen('main');
     setMainScreen('home');
   };
@@ -64,9 +78,13 @@ export default function App() {
     );
   };
 
-  const handleSignupSuccess = (data: { name: string }) => {
+  const handleSignupSuccess = async (data: { name: string }) => {
     console.log('🎉 App.tsx - handleSignupSuccess 호출됨:', data);
     setUserName(data.name);
+    await AsyncStorage.setItem(
+      '@kko/user',
+      JSON.stringify({ id: 'local-user', name: data.name, email: `${data.name}@local` })
+    );
     setScreen('main');
     setMainScreen('home');
     console.log('✅ 화면 전환 완료: main/home');
@@ -79,58 +97,69 @@ export default function App() {
   };
 
   const renderScreen = () => {
-    switch (screen) {
-      case 'splash':
-        return <SplashScreen onGetStarted={() => setScreen('login')} />;
-      case 'login':
-        return (
-          <LoginScreen
-            onLoginSuccess={handleLoginSuccess}
-            onLoginFail={handleLoginFail}
-            onNavigateToSignup={() => setScreen('signup')}
-          />
-        );
-      case 'signup':
-        return (
-          <SignupScreen
-            onSignupSuccess={handleSignupSuccess}
-            onBackToLogin={() => setScreen('login')}
-          />
-        );
-      case 'body-photo-setup':
-        return (
-          <BodyPhotoSetup
-            onBack={() => setScreen('signup')}
-            onComplete={() => setScreen('main')}
-          />
-        );
-      case 'main':
-        switch (mainScreen) {
-          case 'home':
-            return <HomeScreen userName={userName} onNavigate={navigate} onLogout={handleLogout} />;
-          case 'wardrobe-management':
-            return <WardrobeManagement onBack={() => navigate('home')} onNavigate={navigate} />;
-          
-          case 'style-analysis':
-            // 'style-analysis'는 이제 AI 추천 화면인 'daily-outfit'으로 리디렉션됩니다.
-            return <DailyOutfitRecommendation onBack={() => navigate('home')} onNavigate={navigate} />; 
-            
-          case 'shopping':
-            return <ShoppingRecommendations onBack={() => navigate('home')} onNavigate={navigate} />;
-          case 'today-curation':
-            return <TodayCurationDetail onBack={() => navigate('home')} onNavigate={navigate} />;
-            
-          case 'daily-outfit':
-            // 'daily-outfit'은 AI 추천 화면입니다.
-            return <DailyOutfitRecommendation onBack={() => navigate('home')} onNavigate={navigate} />;
-            
-          default:
-            return <HomeScreen userName={userName} onNavigate={navigate} onLogout={handleLogout} />;
-        }
-      default:
-        return null;
-    }
-  };
+  switch (screen) {
+    case 'splash':
+      return <SplashScreen onGetStarted={() => setScreen('login')} />;
+    case 'login':
+      return (
+        <LoginScreen
+          onLoginSuccess={handleLoginSuccess}
+          onLoginFail={handleLoginFail}
+          onNavigateToSignup={() => setScreen('signup')}
+        />
+      );
+    case 'signup':
+      return (
+        <SignupScreen
+          onSignupSuccess={handleSignupSuccess}
+          onBackToLogin={() => setScreen('login')}
+        />
+      );
+    case 'body-photo-setup':
+      return (
+        <BodyPhotoSetup
+          onBack={() => setScreen('signup')}
+          onComplete={() => setScreen('main')}
+        />
+      );
+
+    case 'main':
+      switch (mainScreen) {
+        case 'home':
+          return <HomeScreen userName={userName} onNavigate={navigate} onLogout={handleLogout} />;
+        case 'wardrobe-management':
+          return <WardrobeManagement onBack={() => navigate('home')} onNavigate={navigate} />;
+
+        case 'style-analysis':
+          return <DailyOutfitRecommendation onBack={() => navigate('home')} onNavigate={navigate} />;
+
+        case 'shopping':
+          return <ShoppingRecommendations onBack={() => navigate('home')} onNavigate={navigate} />;
+
+        case 'today-curation':
+          return <TodayCurationDetail onBack={() => navigate('home')} onNavigate={navigate} />;
+
+        case 'daily-outfit':
+          return <DailyOutfitRecommendation onBack={() => navigate('home')} onNavigate={navigate} />;
+
+        // ✅ 여기 네 개를 'default' 위에 추가
+        case 'myinfo':
+          return <MyInfoScreen onBack={() => navigate('home')} />;
+        case 'settings':
+          return <SettingsScreen onBack={() => navigate('home')} />;
+        case 'notifications':
+          return <NotificationsScreen onBack={() => navigate('home')} />;
+        case 'support':
+          return <SupportScreen onBack={() => navigate('home')} />;
+        default:
+          return <HomeScreen userName={userName} onNavigate={navigate} onLogout={handleLogout} />;
+      }
+
+    default:
+      return null;
+  }
+};
+
 
   return (
     <SafeAreaProvider>
