@@ -5,10 +5,17 @@
     "owner": "hyunjin_9953",
     "plugins": [
       "expo-router",
-      "expo-web-browser"
+      "expo-web-browser",
+      "expo-notifications"
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "android": {
+      "permissions": ["POST_NOTIFICATIONS"],
+      "notification": {
+        "channel": "default"
+      }
     },
     "extra": {
       "eas": {
