@@ -69,10 +69,16 @@ type WardrobeItem = {
   loved: boolean;
   top_category?: string;
   bottom_category?: string;
+  outer_category?: string;
+  dress_category?: string;
   top_image?: string;
   bottom_image?: string;
+  outer_image?: string;
+  dress_image?: string;
   has_top?: boolean;
   has_bottom?: boolean;
+  has_outer?: boolean;
+  has_dress?: boolean;
 };
 
 // ✅ 코드 변경 강제 트리거 - v2.0
@@ -83,21 +89,19 @@ export default function DailyOutfitRecommendation({
   onBack: () => void;
   onNavigate: (step: NavigationStep) => void;
 }) {
-  const [selectedOccasion, setSelectedOccasion] = useState<
-    'daily' | 'work' | 'date' | 'party' | 'casual' | 'formal'
-  >('daily');
   const [loading, setLoading] = useState(true);
   const [recommending, setRecommending] = useState(false);
   const [userId, setUserId] = useState<number | null>(null);
   const [wardrobeItems, setWardrobeItems] = useState<WardrobeItem[]>([]);
   const [recommendations, setRecommendations] = useState<Rec[]>([]);
   const [baseItemId, setBaseItemId] = useState<number | null>(null); 
-  const [selectedPart, setSelectedPart] = useState<'full' | 'top' | 'bottom'>('full');
+  const [selectedPart, setSelectedPart] = useState<'top' | 'bottom' | 'outer' | 'dress'>('top');
   const [showChat, setShowChat] = useState(false);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState('');
   const [chatLoading, setChatLoading] = useState(false);
   const [chatRecommendations, setChatRecommendations] = useState<WardrobeItem[]>([]);
+  const [defaultRecommendations, setDefaultRecommendations] = useState<WardrobeItem[]>([]);
 
   
   const baseItem = useMemo(() => {
@@ -109,14 +113,6 @@ export default function DailyOutfitRecommendation({
   }, [wardrobeItems, baseItemId]);
   
 
-  const occasions = [
-    { id: 'daily', name: '데일리', icon: '☀️' },
-    { id: 'work', name: '업무', icon: '💼' },
-    { id: 'date', name: '데이트', icon: '💕' },
-    { id: 'party', name: '파티', icon: '🎉' },
-    { id: 'casual', name: '캐주얼', icon: '👕' },
-    { id: 'formal', name: '포멀', icon: '👔' },
-  ] as const;
 
   const avgScore =
     recommendations.length > 0
@@ -150,10 +146,25 @@ export default function DailyOutfitRecommendation({
 
       if (data.success && data.items.length > 0) {
         const loadedItems: WardrobeItem[] = data.items.map((item: any) => {
-            let name = item.has_top ? `${item.top_color || ''} ${item.top_category}`.trim() : 
-                      item.has_bottom ? `${item.bottom_color || ''} ${item.bottom_category}`.trim() : '새 아이템';
+            // ✅ 우선순위: 드레스 > 아우터 > 상의 > 하의
+            let name = '';
+            let category = '';
             
-            const category = item.has_top ? '상의' : item.has_bottom ? '하의' : '';
+            if (item.has_dress) {
+              name = `${item.dress_color || ''} ${item.dress_category}`.trim();
+              category = '드레스';
+            } else if (item.has_outer) {
+              name = `${item.outer_color || ''} ${item.outer_category}`.trim();
+              category = '아우터';
+            } else if (item.has_top) {
+              name = `${item.top_color || ''} ${item.top_category}`.trim();
+              category = '상의';
+            } else if (item.has_bottom) {
+              name = `${item.bottom_color || ''} ${item.bottom_category}`.trim();
+              category = '하의';
+            } else {
+              name = '새 아이템';
+            }
             
             // ✅ 카테고리별 이미지 URL 생성 (수정!)
             let imageUrl = '';
@@ -183,10 +194,16 @@ export default function DailyOutfitRecommendation({
               loved: false,
               top_category: item.top_category,
               bottom_category: item.bottom_category,
+              outer_category: item.outer_category,
+              dress_category: item.dress_category,
               top_image: item.top_image ? `${API_BASE_URL}${item.top_image}` : undefined,
               bottom_image: item.bottom_image ? `${API_BASE_URL}${item.bottom_image}` : undefined,
+              outer_image: item.outer_image ? `${API_BASE_URL}${item.outer_image}` : undefined,
+              dress_image: item.dress_image ? `${API_BASE_URL}${item.dress_image}` : undefined,
               has_top: item.has_top,
               has_bottom: item.has_bottom,
+              has_outer: item.has_outer,
+              has_dress: item.has_dress,
             };
         });
         
@@ -210,7 +227,7 @@ export default function DailyOutfitRecommendation({
   }, [baseItemId]); 
 
   
-  // ✨ AI 추천 요청 (수정: 상의/하의 분리 추천 지원)
+  // ✨ AI 추천 요청 (수정: 4개 카테고리별 추천 지원)
   const fetchRecommendation = async () => {
     if (!baseItem) {
       Alert.alert('알림', '추천 기준이 될 아이템을 먼저 선택해주세요.');
@@ -223,15 +240,18 @@ export default function DailyOutfitRecommendation({
       // ✅ selectedPart에 따라 다른 엔드포인트 호출
       let url = '';
       
-      if (selectedPart === 'full') {
-        // 전체 코디 유사 추천 (기존 로직)
-        url = `${API_BASE_URL}/api/recommendations/similar/${baseItem.id}?n_results=3&user_id=${userId}`;
-      } else if (selectedPart === 'top') {
-        // 이 상의와 어울리는 하의 추천
-        url = `${API_BASE_URL}/api/recommendations/match-bottom/${baseItem.id}?n_results=3&user_id=${userId}`;
+      if (selectedPart === 'top') {
+        // 상의 → 하의 or 아우터 추천
+        url = `${API_BASE_URL}/api/recommendations/match-bottom-or-outer/${baseItem.id}?n_results=3&user_id=${userId}`;
       } else if (selectedPart === 'bottom') {
-        // 이 하의와 어울리는 상의 추천
-        url = `${API_BASE_URL}/api/recommendations/match-top/${baseItem.id}?n_results=3&user_id=${userId}`;
+        // 하의 → 상의 or 아우터+상의 추천
+        url = `${API_BASE_URL}/api/recommendations/match-top-or-outer-top/${baseItem.id}?n_results=3&user_id=${userId}`;
+      } else if (selectedPart === 'outer') {
+        // 아우터 → 상의 or 하의 or 상의+하의 추천
+        url = `${API_BASE_URL}/api/recommendations/match-top-or-bottom-or-combo/${baseItem.id}?n_results=3&user_id=${userId}`;
+      } else if (selectedPart === 'dress') {
+        // 드레스 → 하의 or 아우터 추천
+        url = `${API_BASE_URL}/api/recommendations/match-bottom-or-outer/${baseItem.id}?n_results=3&user_id=${userId}`;
       }
       
       console.log(`\n✨ 추천 요청 URL: ${url}`);
@@ -265,30 +285,50 @@ export default function DailyOutfitRecommendation({
           return {
             id: rec.id,
             image: imageUrl,
-            title: selectedPart === 'full' 
-              ? `${baseItem.name} 아이템과 유사`
-              : selectedPart === 'top'
-              ? `${baseItem.name}와 어울리는 하의`
-              : `${baseItem.name}와 어울리는 상의`,
+            title: selectedPart === 'top'
+              ? `${baseItem.name}와 어울리는 하의/아우터`
+              : selectedPart === 'bottom'
+              ? `${baseItem.name}와 어울리는 상의/아우터+상의`
+              : selectedPart === 'outer'
+              ? `${baseItem.name}와 어울리는 상의/하의/상의+하의`
+              : `${baseItem.name}와 어울리는 하의/아우터`,
             items: [rec.name, rec.category],
-            score: Math.round((1.0 - rec.distance) * 100), 
-            reason: `유사도 점수: ${(1.0 - rec.distance).toFixed(2)}`,
+            score: rec.distance ? Math.round((1.0 - rec.distance) * 100) : 80, 
+            reason: rec.distance ? `유사도 점수: ${(1.0 - rec.distance).toFixed(2)}` : '추천 점수: 80',
             is_default: rec.is_default || false,
           };
         });
         
-        setRecommendations(recs);
+        // 기본 아이템 추천도 함께 추가
+        const combinedRecs = [...recs];
         
-        const hasDefaultItems = recs.some(r => r.is_default);
-        const recommendType = selectedPart === 'full' ? '유사한' : '어울리는';
+        // 기본 아이템 추천이 있으면 추가
+        if (defaultRecommendations.length > 0) {
+          const defaultRecs = defaultRecommendations.map((item, index) => ({
+            id: item.id,
+            image: item.image,
+            title: item.name,
+            items: [item.name, item.category],
+            score: 80, // 기본 아이템은 80점
+            reason: '기본 추천 아이템',
+            is_default: true,
+          }));
+          
+          combinedRecs.push(...defaultRecs);
+        }
+        
+        setRecommendations(combinedRecs);
+        
+        const hasDefaultItems = combinedRecs.some(r => r.is_default);
+        const recommendType = '어울리는';
         
         if (hasDefaultItems) {
           Alert.alert(
             '추천 완료',
-            `${baseItem.name}와 ${recommendType} 아이템 ${recs.length}개를 찾았습니다.\n\n일부 기본 추천 아이템이 포함되었습니다.`
+            `${baseItem.name}와 ${recommendType} 아이템 ${combinedRecs.length}개를 찾았습니다.\n\n일부 기본 추천 아이템이 포함되었습니다.`
           );
         } else {
-          Alert.alert('추천 완료', `${baseItem.name}와 ${recommendType} 아이템 ${recs.length}개를 찾았습니다.`);
+          Alert.alert('추천 완료', `${baseItem.name}와 ${recommendType} 아이템 ${combinedRecs.length}개를 찾았습니다.`);
         }
       } else {
         Alert.alert('추천 실패', data.detail || '추천 목록을 가져오지 못했습니다.');
@@ -403,6 +443,36 @@ export default function DailyOutfitRecommendation({
     }
   };
 
+  // 🎯 기본 아이템 추천 가져오기
+  const fetchDefaultRecommendations = useCallback(async () => {
+    if (!userId) return;
+    
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/recommendations/default/${userId}`);
+      const data = await response.json();
+      
+      if (data.success && data.recommendations) {
+        const items: WardrobeItem[] = data.recommendations.map((rec: any) => ({
+          id: rec.id,
+          name: rec.name,
+          brand: 'AI 추천',
+          image: `${API_BASE_URL}/api/images/${rec.image_path}`,  // image_path 필드 사용
+          category: rec.category,
+          loved: false,
+          has_top: rec.has_top,
+          has_bottom: rec.has_bottom,
+          has_outer: rec.has_outer,
+          has_dress: rec.has_dress,
+        }));
+        
+        setDefaultRecommendations(items);
+        console.log(`✅ 기본 아이템 추천 ${items.length}개 로드 완료`);
+      }
+    } catch (error) {
+      console.error('❌ 기본 아이템 추천 로드 오류:', error);
+    }
+  }, [userId]);
+
 
   useEffect(() => {
     const loadUser = async () => {
@@ -412,6 +482,7 @@ export default function DailyOutfitRecommendation({
           const user = JSON.parse(userStr);
           setUserId(user.user_id);
           fetchWardrobe(user.user_id);
+          fetchDefaultRecommendations(); // 기본 아이템 추천 로드
         } else {
           Alert.alert('로그인 필요', '로그인이 필요합니다.');
         }
@@ -622,36 +693,17 @@ export default function DailyOutfitRecommendation({
         </View>
 
         {/* C. 추천 방식 선택 */}
-        {baseItem && (baseItem.has_top || baseItem.has_bottom) && (
+        {baseItem && (baseItem.has_top || baseItem.has_bottom || baseItem.has_outer || baseItem.has_dress) && (
           <View>
             <Text style={styles.sectionTitle}>추천 방식 선택</Text>
             <Text style={styles.sectionSubtitle}>
-              {selectedPart === 'full' ? '전체 코디 유사 추천' :
-              selectedPart === 'top' ? '이 상의와 어울리는 하의 추천' :
-              '이 하의와 어울리는 상의 추천'}
+              {selectedPart === 'top' ? '이 상의와 어울리는 하의 or 아우터 추천' :
+              selectedPart === 'bottom' ? '이 하의와 어울리는 상의 or 아우터+상의 추천' :
+              selectedPart === 'outer' ? '이 아우터와 어울리는 상의 or 하의 or 상의+하의 추천' :
+              '이 드레스와 어울리는 하의 or 아우터 추천'}
             </Text>
             
             <View style={styles.partSelector}>
-              <Pressable 
-                style={[
-                  styles.partCard,
-                  selectedPart === 'full' && styles.partCardActive
-                ]}
-                onPress={() => {
-                  setSelectedPart('full');
-                  setRecommendations([]);
-                }}
-                disabled={loading || recommending}
-              >
-                <Image source={{ uri: baseItem.image }} style={styles.partImage} />
-                <Text style={[
-                  styles.partText,
-                  selectedPart === 'full' && styles.partTextActive
-                ]}>
-                  전체
-                </Text>
-              </Pressable>
-              
               {baseItem.has_top && baseItem.top_image && (
                 <Pressable 
                   style={[
@@ -695,38 +747,55 @@ export default function DailyOutfitRecommendation({
                   </Text>
                 </Pressable>
               )}
+
+              {baseItem.has_outer && baseItem.outer_image && (
+                <Pressable 
+                  style={[
+                    styles.partCard,
+                    selectedPart === 'outer' && styles.partCardActive
+                  ]}
+                  onPress={() => {
+                    setSelectedPart('outer');
+                    setRecommendations([]);
+                  }}
+                  disabled={loading || recommending}
+                >
+                  <Image source={{ uri: baseItem.outer_image }} style={styles.partImage} />
+                  <Text style={[
+                    styles.partText,
+                    selectedPart === 'outer' && styles.partTextActive
+                  ]}>
+                    🧥 아우터
+                  </Text>
+                </Pressable>
+              )}
+
+              {baseItem.has_dress && baseItem.dress_image && (
+                <Pressable 
+                  style={[
+                    styles.partCard,
+                    selectedPart === 'dress' && styles.partCardActive
+                  ]}
+                  onPress={() => {
+                    setSelectedPart('dress');
+                    setRecommendations([]);
+                  }}
+                  disabled={loading || recommending}
+                >
+                  <Image source={{ uri: baseItem.dress_image }} style={styles.partImage} />
+                  <Text style={[
+                    styles.partText,
+                    selectedPart === 'dress' && styles.partTextActive
+                  ]}>
+                    👗 드레스
+                  </Text>
+                </Pressable>
+              )}
             </View>
           </View>
         )}
         
-        {/* D. 상황별 선택 */}
-        <View>
-          <Text style={styles.sectionTitle}>추천 상황 선택</Text>
-          <View style={[styles.occGrid, { marginTop: 12 }]}>
-            {occasions.map((occ) => (
-              <Pressable
-                key={occ.id}
-                onPress={() => setSelectedOccasion(occ.id)}
-                disabled={loading || recommending}
-                style={[
-                  styles.occBtn,
-                  selectedOccasion === occ.id ? styles.occActive : styles.occIdle,
-                  (loading || recommending) && styles.occBtnDisabled
-                ]}
-              >
-                <Text style={styles.occEmoji}>{occ.icon}</Text>
-                <Text
-                  style={[
-                    styles.occText,
-                    selectedOccasion === occ.id && styles.occTextActive,
-                  ]}
-                >
-                  {occ.name}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
-        </View>
+
 
         {/* 👇 채팅 추천 결과 섹션 추가 (E. 추천 결과 목록 위에) */}
         {chatRecommendations.length > 0 && (
@@ -809,7 +878,7 @@ export default function DailyOutfitRecommendation({
                     </View>
                     <View style={styles.bestBadge}>
                         <Text style={styles.bestBadgeText}>
-                            {index === 0 ? 'BEST MATCH' : `No.${index + 1}`}
+                            {rec.is_default ? '기본 추천' : (index === 0 ? 'BEST MATCH' : `No.${index + 1}`)}
                         </Text>
                     </View>
                   </View>

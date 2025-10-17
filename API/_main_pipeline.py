@@ -34,9 +34,13 @@ class FashionPipeline:
         
         print("\n=== 모델 로딩 중 ===")
         
-        # 1. YOLO Pose 모델
-        print("1. YOLO Pose 로드...")
-        self.yolo_model = YOLO(yolo_pose_path)
+        # 1. YOLO Pose 모델 (선택적)
+        if yolo_pose_path:
+            print("1. YOLO Pose 로드...")
+            self.yolo_model = YOLO(yolo_pose_path)
+        else:
+            print("1. YOLO Pose 건너뛰기...")
+            self.yolo_model = None
         
         # 1-1. YOLO Detection 모델 (상의/하의/아우터/드레스 분류)
         print("1-1. YOLO Detection 로드...")
@@ -107,10 +111,25 @@ class FashionPipeline:
                 'user': 'postgres',
                 'password': '000000'
             }
+        self.db_config = db_config  # 연결 정보 저장
         self.db_conn = psycopg2.connect(**db_config)
         
         print("\n✓ 모든 모델 로드 완료\n")
     
+    def reconnect_db(self):
+        """데이터베이스 연결 재시도"""
+        try:
+            if hasattr(self, 'db_conn') and self.db_conn:
+                self.db_conn.close()
+        except:
+            pass
+        
+        try:
+            self.db_conn = psycopg2.connect(**self.db_config)
+            print("✅ 데이터베이스 재연결 성공")
+        except Exception as e:
+            print(f"❌ 데이터베이스 재연결 실패: {e}")
+            raise
     
     def detect_fashion_categories(self, image_path: str) -> Dict:
         """YOLO Detection으로 상의/하의/아우터/드레스 4개 카테고리 분류"""
@@ -211,6 +230,17 @@ class FashionPipeline:
         """1단계: YOLO Pose로 상/하의 분리"""
         
         print(f"[1/6] 이미지 분리 중: {image_path}")
+        
+        # YOLO Pose 모델이 없으면 전체 이미지만 반환
+        if self.yolo_model is None:
+            print("  ⚠️ YOLO Pose 모델이 없어서 전체 이미지만 사용합니다.")
+            return {
+                'original': image_path,
+                'top': None,
+                'bottom': None,
+                'has_top': False,
+                'has_bottom': False
+            }
         
         # 이미지 로드
         image = cv2.imread(image_path)

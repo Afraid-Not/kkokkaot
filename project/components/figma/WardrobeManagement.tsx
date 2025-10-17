@@ -582,15 +582,6 @@ export default function WardrobeManagement({
             )}
 
 
-            {/* 원본 이미지 섹션 수정 */}
-            <View style={styles.modalSection}>
-              <Text style={styles.modalSectionTitle}>📷 원본 이미지</Text>
-              <Image 
-                source={{ uri: `${API_BASE_URL}/api/images/${item.original_image_path.split(/\\|\//).pop()}` }} 
-                style={styles.modalOriginalImage}
-                resizeMode="contain"
-              />
-            </View>
 
 
             {/* 상의 정보 */}
