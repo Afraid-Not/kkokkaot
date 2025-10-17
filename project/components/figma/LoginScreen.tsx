@@ -7,7 +7,8 @@ import {
   StyleSheet, 
   Alert, 
   ActivityIndicator,
-  TextInput as RNTextInput 
+  TextInput as RNTextInput,
+  ImageBackground 
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -123,77 +124,124 @@ export default function LoginScreen({
   };
 
   return (
-    <View style={[styles.container, { backgroundColor: '#000' }]}> 
-      <Text style={styles.title}>로그인</Text>
+    <ImageBackground 
+      source={require('../../assets/login_logo.png')}
+      style={styles.container}
+      resizeMode="cover"
+      imageStyle={styles.backgroundImage}
+    >
+      <View style={styles.overlay} />
+      <View style={styles.formContainer}>
+        <TextInput
+          style={styles.input}
+          placeholder="이메일"
+          placeholderTextColor="#999"
+          value={email}
+          onChangeText={handleEmailChange}
+          keyboardType="email-address"
+          autoCapitalize="none"
+          autoCorrect={false}
+          returnKeyType="next"
+          onSubmitEditing={() => passwordInputRef.current?.focus()}
+        />
+        
+        <TextInput
+          ref={passwordInputRef}
+          style={styles.input}
+          placeholder="비밀번호"
+          placeholderTextColor="#999"
+          value={password}
+          onChangeText={setPassword}
+          secureTextEntry
+          returnKeyType="done"
+          onSubmitEditing={handleLogin}
+        />
+        
+        <Pressable 
+          style={[styles.button, loading && { opacity: 0.6 }]} 
+          onPress={handleLogin} 
+          disabled={loading}
+        >
+          {loading ? (
+            <ActivityIndicator color="#FFF" />
+          ) : (
+            <Text style={styles.buttonText}>로그인</Text>
+          )}
+        </Pressable>
+        
+        <Pressable style={styles.linkButton} onPress={onNavigateToSignup}>
+          <Text style={styles.linkButtonText}>계정이 없으신가요? 회원가입</Text>
+        </Pressable>
+      </View>
       
-      <TextInput
-        style={styles.input}
-        placeholder="이메일"
-        placeholderTextColor="#6B7280"
-        value={email}
-        onChangeText={handleEmailChange}
-        keyboardType="email-address"
-        autoCapitalize="none"
-        autoCorrect={false}
-        returnKeyType="next"
-        onSubmitEditing={() => passwordInputRef.current?.focus()}
-      />
-      
-      <TextInput
-        ref={passwordInputRef}
-        style={styles.input}
-        placeholder="비밀번호"
-        placeholderTextColor="#6B7280"
-        value={password}
-        onChangeText={setPassword}
-        secureTextEntry
-        returnKeyType="done"
-        onSubmitEditing={handleLogin}
-      />
-      
-      <Pressable 
-        style={[styles.button, loading && { opacity: 0.6 }]} 
-        onPress={handleLogin} 
-        disabled={loading}
-      >
-        {loading ? (
-          <ActivityIndicator color="#FFF" />
-        ) : (
-          <Text style={styles.buttonText}>로그인</Text>
-        )}
-      </Pressable>
-      
-      <Pressable style={styles.linkButton} onPress={onNavigateToSignup}>
-        <Text style={styles.linkButtonText}>계정이 없으신가요? 회원가입</Text>
-      </Pressable>
-    </View>
+      <Text style={styles.creditText}>Curated by the 3M2C</Text>
+    </ImageBackground>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, justifyContent: 'center', padding: 20 }, 
-  title: { 
-    fontSize: 28, 
-    fontWeight: 'bold', 
-    textAlign: 'center', 
-    marginBottom: 24, 
-    color: '#FFF' 
-  }, 
+  container: { 
+    flex: 1, 
+    justifyContent: 'center',
+  },
+  backgroundImage: {
+    transform: [{ translateX: -10 }, { scale: 1.1 }],
+  },
+  overlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+  },
+  formContainer: {
+    padding: 24,
+    marginTop: 200,
+  },
   input: { 
-    backgroundColor: '#F3F4F6', 
-    padding: 12, 
-    borderRadius: 8, 
+    backgroundColor: 'rgba(255, 255, 255, 0.95)', 
+    padding: 16, 
+    borderRadius: 12, 
     fontSize: 16, 
-    marginBottom: 16,
-    color: '#111'
+    marginBottom: 12,
+    color: '#111',
+    borderWidth: 1,
+    borderColor: 'rgba(139, 115, 85, 0.3)',
   },
   button: { 
-    backgroundColor: '#111', 
-    padding: 16, 
-    borderRadius: 8, 
-    alignItems: 'center' 
+    backgroundColor: 'rgba(139, 115, 85, 0.95)', 
+    padding: 18, 
+    borderRadius: 12, 
+    alignItems: 'center',
+    marginTop: 8,
   },
-  buttonText: { color: '#FFF', fontWeight: 'bold', fontSize: 16 },
-  linkButton: { marginTop: 20, alignItems: 'center' },
-  linkButtonText: { color: '#D1D5DB', fontSize: 14 },
+  buttonText: { 
+    color: '#FFF', 
+    fontWeight: 'bold', 
+    fontSize: 17,
+    letterSpacing: 0.5,
+  },
+  linkButton: { 
+    marginTop: 20, 
+    alignItems: 'center',
+    padding: 8,
+  },
+  linkButtonText: { 
+    color: '#FFF', 
+    fontSize: 15,
+    fontWeight: '500',
+    textShadowColor: 'rgba(0, 0, 0, 0.5)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
+  },
+  creditText: {
+    position: 'absolute',
+    bottom: 20,
+    left: 0,
+    right: 0,
+    color: 'rgba(255, 255, 255, 0.7)',
+    fontSize: 12,
+    textAlign: 'center',
+    letterSpacing: 0.5,
+    textShadowColor: 'rgba(0, 0, 0, 0.3)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
+  },
 });

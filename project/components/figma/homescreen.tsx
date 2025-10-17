@@ -84,11 +84,17 @@ export default function HomeScreen({
         <View style={styles.headerInner}>
           <View>
             <View style={styles.rowStart}>
-              <Text style={styles.brand}>꼬까옷</Text>
+              <Image 
+                source={require('../../assets/home_logo.jpg')}
+                style={styles.brandLogo}
+                resizeMode="contain"
+              />
               <View style={styles.headerDivider} />
-              <Text style={styles.hello}>안녕하세요, {userName}님</Text>
+              <View style={styles.textContainer}>
+                <Text style={styles.hello}>안녕하세요, {userName}님</Text>
+                <Text style={styles.subMuted}>{todayWeather.temp} · {todayWeather.condition}</Text>
+              </View>
             </View>
-            <Text style={styles.subMuted}>{todayWeather.temp} · {todayWeather.condition}</Text>
           </View>
           <Pressable style={styles.iconBtn} onPress={() => setMenuOpen(true)}>
             <Menu size={20} color="#111" />
@@ -216,7 +222,11 @@ const styles = StyleSheet.create({
   headerWrap: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#F3F4F6', backgroundColor: '#FFFFFFE6' },
   headerInner: { paddingHorizontal: 16, paddingVertical: 12, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   brand: { fontSize: 22, fontWeight: '600', letterSpacing: 0.5, color: '#000' },
-  headerDivider: { width: 1, height: 20, backgroundColor: '#D1D5DB', marginHorizontal: 10 },
+  brandLogo: { 
+    width: 100, 
+    height: 36, 
+  },
+  headerDivider: { width: 1, height: 20, backgroundColor: '#D1D5DB', marginLeft: 0, marginRight: 8 },
   hello: { fontSize: 16, color: '#111827' },
   subMuted: { fontSize: 12, color: '#6B7280', marginTop: 2 },
   iconBtn: { padding: 4 },

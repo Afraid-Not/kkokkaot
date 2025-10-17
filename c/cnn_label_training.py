@@ -240,9 +240,10 @@ class FashionLabelTrainer:
         
         return train_loader, test_loader
     
-    def train_model(self, train_loader, test_loader, num_classes, epochs=50, learning_rate=0.001):
+    def train_model(self, train_loader, test_loader, num_classes, target_attribute, epochs=50, learning_rate=0.001):
         """모델 학습"""
         print(f"\n🚀 모델 학습 시작 (에포크: {epochs}, 학습률: {learning_rate})")
+        print(f"   타겟 속성: {target_attribute}")
         
         # 모델 초기화
         self.model = FashionCNN(num_classes).to(DEVICE)
@@ -307,10 +308,14 @@ class FashionLabelTrainer:
             val_losses.append(val_loss)
             val_accuracies.append(val_acc)
             
-            # 최고 성능 모델 저장
+            # 최고 성능 모델 저장 (속성별로 다른 파일명 사용)
             if val_acc > best_val_acc:
                 best_val_acc = val_acc
-                torch.save(self.model.state_dict(), self.output_dir / 'best_model.pth')
+                # 한글을 영어로 변환
+                attr_name = target_attribute.replace('상의', 'top').replace('하의', 'bottom').replace('아우터', 'outer').replace('원피스', 'dress')
+                model_filename = f'best_model_{attr_name}.pth'
+                torch.save(self.model.state_dict(), self.output_dir / model_filename)
+                print(f"💾 모델 저장: {model_filename} (Val Acc: {val_acc:.2f}%)")
             
             scheduler.step()
             
@@ -391,18 +396,24 @@ class FashionLabelTrainer:
     
     def save_model_info(self, target_attribute, num_classes, best_acc):
         """모델 정보 저장"""
+        # 한글을 영어로 변환
+        attr_name = target_attribute.replace('상의', 'top').replace('하의', 'bottom').replace('아우터', 'outer').replace('원피스', 'dress')
+        model_filename = f'best_model_{attr_name}.pth'
+        info_filename = f'model_info_{attr_name}.json'
+        
         model_info = {
             'target_attribute': target_attribute,
+            'target_attribute_en': attr_name,
             'num_classes': num_classes,
             'class_names': self.label_encoders[target_attribute].classes_.tolist(),
             'best_accuracy': best_acc,
-            'model_path': str(self.output_dir / 'best_model.pth')
+            'model_path': str(self.output_dir / model_filename)
         }
         
-        with open(self.output_dir / 'model_info.json', 'w', encoding='utf-8') as f:
+        with open(self.output_dir / info_filename, 'w', encoding='utf-8') as f:
             json.dump(model_info, f, ensure_ascii=False, indent=2)
         
-        print(f"💾 모델 정보 저장: {self.output_dir / 'model_info.json'}")
+        print(f"💾 모델 정보 저장: {self.output_dir / info_filename}")
 
 def main():
     """메인 실행 함수"""
@@ -451,7 +462,7 @@ def main():
             # 모델 학습
             num_classes = len(trainer.label_encoders[target_attr].classes_)
             best_acc = trainer.train_model(
-                train_loader, test_loader, num_classes, epochs=30, learning_rate=0.001
+                train_loader, test_loader, num_classes, target_attr, epochs=30, learning_rate=0.001
             )
             
             # 모델 평가
