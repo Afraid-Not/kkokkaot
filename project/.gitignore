@@ -2,6 +2,11 @@
 
 # dependencies
 node_modules/
+converted_data/all_images/
+converted_data/cnn/
+converted_data/yolo/
+converted_data/sam/
+converted_data/
 
 # Expo
 .expo/

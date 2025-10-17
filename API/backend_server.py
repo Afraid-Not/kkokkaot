@@ -34,6 +34,7 @@ async def lifespan(app: FastAPI):
     try:
         pipeline = FashionPipeline(
             yolo_pose_path="D:/kkokkaot/API/pre_trained_weights/yolo11n-pose.pt",
+            yolo_detection_path="D:/kkokkaot/API/pre_trained_weights/yolo_best.pt",
             top_model_path="D:/kkokkaot/API/pre_trained_weights/fashion_top_model_1014_2101.pth",
             bottom_model_path="D:/kkokkaot/API/pre_trained_weights/fashion_bottom_model_1015_1038.pth",
             # top_model_path="D:/kkokkaot/API/pre_trained_weights/fashion_top_model.pth",
@@ -435,6 +436,8 @@ def get_wardrobe(user_id: int, include_defaults: bool = True):
                     w.upload_date,
                     w.has_top,
                     w.has_bottom,
+                    w.has_outer,
+                    w.has_dress,
                     w.is_default,
                     t.category as top_category,
                     t.color as top_color,
@@ -462,6 +465,8 @@ def get_wardrobe(user_id: int, include_defaults: bool = True):
                         w.upload_date,
                         w.has_top,
                         w.has_bottom,
+                        w.has_outer,
+                        w.has_dress,
                         w.is_default,
                         t.category as top_category,
                         t.color as top_color,
@@ -488,83 +493,99 @@ def get_wardrobe(user_id: int, include_defaults: bool = True):
             for row in rows:
                 item_id = row[0]
                 image_path = row[1]
+                has_top = row[3]
+                has_bottom = row[4]
+                has_outer = row[5]
+                has_dress = row[6]
                 
-                # ✅ 아우터 판단
-                top_category = row[6].lower() if row[6] else ''
-                outer_keywords = ['coat', 'jacket', 'blazer', 'cardigan', 'jumper']
-                is_outer = any(keyword in top_category for keyword in outer_keywords)
-                
-                # 1순위: 전체 이미지 (full)
+                # ✅ 이미지 우선순위: 전체 이미지 > 개별 카테고리 > 원본
                 display_image_path = None
+                image_category = 'original'
                 
-                # 1순위: 전체 이미지 (full)
+                # 1순위: 전체 이미지 (full) - 전체 카테고리에서 사용
                 full_path = processed_dir / 'full' / f"item_{item_id}_full.jpg"
                 if full_path.exists():
-                    display_image_path = f"item_{item_id}_full.jpg"  # 👈 파일명만!
+                    display_image_path = f"item_{item_id}_full.jpg"
                     image_category = 'full'
                 
-                # 2순위: 상의가 있으면 상의 이미지 (top 또는 outer)
-                elif row[3]:  # has_top
-                    if is_outer:
-                        outer_path = processed_dir / 'outer' / f"item_{item_id}_outer.jpg"
-                        if outer_path.exists():
-                            display_image_path = f"item_{item_id}_outer.jpg"  # 👈 파일명만!
-                            image_category = 'outer'
-                    else:
-                        top_path = processed_dir / 'top' / f"item_{item_id}_top.jpg"
-                        if top_path.exists():
-                            display_image_path = f"item_{item_id}_top.jpg"  # 👈 파일명만!
-                            image_category = 'top'
+                # 2순위: 개별 카테고리 이미지 (카테고리별 필터에서 사용)
+                # 드레스 > 아우터 > 상의 > 하의 순서
+                elif has_dress:
+                    dress_path = processed_dir / 'dress' / f"item_{item_id}_dress.jpg"
+                    if dress_path.exists():
+                        display_image_path = f"item_{item_id}_dress.jpg"
+                        image_category = 'dress'
                 
-                # 3순위: 하의 이미지
-                elif row[4]:  # has_bottom
+                elif has_outer:
+                    outer_path = processed_dir / 'outer' / f"item_{item_id}_outer.jpg"
+                    if outer_path.exists():
+                        display_image_path = f"item_{item_id}_outer.jpg"
+                        image_category = 'outer'
+                
+                elif has_top:
+                    top_path = processed_dir / 'top' / f"item_{item_id}_top.jpg"
+                    if top_path.exists():
+                        display_image_path = f"item_{item_id}_top.jpg"
+                        image_category = 'top'
+                
+                elif has_bottom:
                     bottom_path = processed_dir / 'bottom' / f"item_{item_id}_bottom.jpg"
                     if bottom_path.exists():
-                        display_image_path = f"item_{item_id}_bottom.jpg"  # 👈 파일명만!
+                        display_image_path = f"item_{item_id}_bottom.jpg"
                         image_category = 'bottom'
                 
-                # 4순위: 원본 이미지 (폴백)
+                # 3순위: 원본 이미지 (폴백)
                 if not display_image_path:
                     filename = Path(image_path).name
-                    display_image_path = filename  # 👈 파일명만!
+                    display_image_path = filename
                     image_category = 'original'
                 
                 # 분리된 이미지 경로들
                 top_image = None
                 bottom_image = None
+                outer_image = None
+                dress_image = None
                 
-                if row[3]:  # has_top
-                    if is_outer:
-                        outer_img_path = processed_dir / 'outer' / f"item_{item_id}_outer.jpg"
-                        if outer_img_path.exists():
-                            top_image = f"/api/processed-images/outer/item_{item_id}_outer.jpg"
-                    else:
-                        top_img_path = processed_dir / 'top' / f"item_{item_id}_top.jpg"
-                        if top_img_path.exists():
-                            top_image = f"/api/processed-images/top/item_{item_id}_top.jpg"
+                if has_top:
+                    top_img_path = processed_dir / 'top' / f"item_{item_id}_top.jpg"
+                    if top_img_path.exists():
+                        top_image = f"/api/processed-images/top/item_{item_id}_top.jpg"
                 
-                if row[4]:  # has_bottom
+                if has_bottom:
                     bottom_img_path = processed_dir / 'bottom' / f"item_{item_id}_bottom.jpg"
                     if bottom_img_path.exists():
                         bottom_image = f"/api/processed-images/bottom/item_{item_id}_bottom.jpg"
+                
+                if has_outer:
+                    outer_img_path = processed_dir / 'outer' / f"item_{item_id}_outer.jpg"
+                    if outer_img_path.exists():
+                        outer_image = f"/api/processed-images/outer/item_{item_id}_outer.jpg"
+                
+                if has_dress:
+                    dress_img_path = processed_dir / 'dress' / f"item_{item_id}_dress.jpg"
+                    if dress_img_path.exists():
+                        dress_image = f"/api/processed-images/dress/item_{item_id}_dress.jpg"
                 
                 item = {
                     'id': row[0],
                     'image_path': display_image_path,  # ✅ YOLO로 자른 이미지
                     'image_category': image_category,   # ✅ 카테고리 정보 추가
                     'upload_date': row[2].isoformat() if row[2] else None,
-                    'has_top': row[3],
-                    'has_bottom': row[4],
-                    'is_default': row[5],
-                    'top_category': row[6],
-                    'top_color': row[7],
-                    'top_fit': row[8],
-                    'bottom_category': row[9],
-                    'bottom_color': row[10],
-                    'bottom_fit': row[11],
+                    'has_top': has_top,
+                    'has_bottom': has_bottom,
+                    'has_outer': has_outer,
+                    'has_dress': has_dress,
+                    'is_default': row[7],
+                    'top_category': row[8],
+                    'top_color': row[9],
+                    'top_fit': row[10],
+                    'bottom_category': row[11],
+                    'bottom_color': row[12],
+                    'bottom_fit': row[13],
                     'top_image': top_image,
                     'bottom_image': bottom_image,
-                    'is_outer': is_outer
+                    'outer_image': outer_image,
+                    'dress_image': dress_image
                 }
                 items.append(item)
             
@@ -1037,7 +1058,8 @@ def get_item_detail(item_id: int):
                     w.upload_date,
                     w.has_top,
                     w.has_bottom,
-                    w.waist_y,
+                    w.has_outer,
+                    w.has_dress,
                     -- 상의 속성
                     t.category as top_category,
                     t.color as top_color,
@@ -1076,37 +1098,35 @@ def get_item_detail(item_id: int):
                 'upload_date': row[2].isoformat() if row[2] else None,
                 'has_top': row[3],
                 'has_bottom': row[4],
-                'waist_y': row[5],
+                'has_outer': row[5],
+                'has_dress': row[6],
             }
             
             # 3. 상의 속성
             if row[3]:  # has_top
                 item_data['top_attributes'] = {
-                    'category': row[6],
-                    'color': row[7],
-                    'fit': row[8],
-                    'materials': row[9],
-                    'category_confidence': float(row[10]) if row[10] else 0,
-                    'color_confidence': float(row[11]) if row[11] else 0,
-                    'fit_confidence': float(row[12]) if row[12] else 0,
+                    'category': row[7],
+                    'color': row[8],
+                    'fit': row[9],
+                    'materials': row[10],
+                    'category_confidence': float(row[11]) if row[11] else 0,
+                    'color_confidence': float(row[12]) if row[12] else 0,
+                    'fit_confidence': float(row[13]) if row[13] else 0,
                 }
                 
-                # ✅ 아우터 판단
-                top_category = row[6].lower() if row[6] else ''
-                outer_keywords = ['coat', 'jacket', 'blazer', 'cardigan', 'jumper']
-                is_outer = any(keyword in top_category for keyword in outer_keywords)
-                item_data['is_outer'] = is_outer
+                # ✅ 아우터 판단 (이제 has_outer 필드로 직접 확인)
+                item_data['is_outer'] = row[5]  # has_outer
             
             # 4. 하의 속성
             if row[4]:  # has_bottom
                 item_data['bottom_attributes'] = {
-                    'category': row[13],
-                    'color': row[14],
-                    'fit': row[15],
-                    'materials': row[16],
-                    'category_confidence': float(row[17]) if row[17] else 0,
-                    'color_confidence': float(row[18]) if row[18] else 0,
-                    'fit_confidence': float(row[19]) if row[19] else 0,
+                    'category': row[14],
+                    'color': row[15],
+                    'fit': row[16],
+                    'materials': row[17],
+                    'category_confidence': float(row[18]) if row[18] else 0,
+                    'color_confidence': float(row[19]) if row[19] else 0,
+                    'fit_confidence': float(row[20]) if row[20] else 0,
                 }
             
             # 5. ✅ 분리된 이미지 경로 찾기 (폴더 구조 반영)
@@ -1117,22 +1137,29 @@ def get_item_detail(item_id: int):
             if full_image_path.exists():
                 item_data['full_image_path'] = f"/api/processed-images/full/item_{item_id}_full.jpg"
             
-            # 상의 (top 또는 outer)
+            # 상의
             if row[3]:  # has_top
-                if item_data.get('is_outer'):
-                    outer_image_path = processed_dir / 'outer' / f"item_{item_id}_outer.jpg"
-                    if outer_image_path.exists():
-                        item_data['top_image_path'] = f"/api/processed-images/outer/item_{item_id}_outer.jpg"
-                else:
-                    top_image_path = processed_dir / 'top' / f"item_{item_id}_top.jpg"
-                    if top_image_path.exists():
-                        item_data['top_image_path'] = f"/api/processed-images/top/item_{item_id}_top.jpg"
+                top_image_path = processed_dir / 'top' / f"item_{item_id}_top.jpg"
+                if top_image_path.exists():
+                    item_data['top_image_path'] = f"/api/processed-images/top/item_{item_id}_top.jpg"
             
             # 하의
             if row[4]:  # has_bottom
                 bottom_image_path = processed_dir / 'bottom' / f"item_{item_id}_bottom.jpg"
                 if bottom_image_path.exists():
                     item_data['bottom_image_path'] = f"/api/processed-images/bottom/item_{item_id}_bottom.jpg"
+            
+            # 아우터
+            if row[5]:  # has_outer
+                outer_image_path = processed_dir / 'outer' / f"item_{item_id}_outer.jpg"
+                if outer_image_path.exists():
+                    item_data['outer_image_path'] = f"/api/processed-images/outer/item_{item_id}_outer.jpg"
+            
+            # 드레스
+            if row[6]:  # has_dress
+                dress_image_path = processed_dir / 'dress' / f"item_{item_id}_dress.jpg"
+                if dress_image_path.exists():
+                    item_data['dress_image_path'] = f"/api/processed-images/dress/item_{item_id}_dress.jpg"
             
             print(f"✅ 상세 정보 조회 완료")
             print(f"{'='*60}\n")
@@ -1158,7 +1185,7 @@ def get_processed_image_by_category(category: str, filename: str):
     """카테고리별 분리된 이미지 파일 제공 (full/top/bottom/outer)"""
     
     # 허용된 카테고리 체크
-    allowed_categories = ['full', 'top', 'bottom', 'outer']
+    allowed_categories = ['full', 'top', 'bottom', 'outer', 'dress']
     if category not in allowed_categories:
         raise HTTPException(status_code=400, detail="Invalid category")
     
@@ -1273,6 +1300,808 @@ async def chat_recommend(
             "success": False,
             "message": f"오류 발생: {str(e)}"
         }
+
+
+# ✅ 상의 → 하의 or 아우터 추천
+@app.get("/api/recommendations/match-bottom-or-outer/{item_id}")
+def get_matching_bottom_or_outer(
+    item_id: int, 
+    n_results: int = 3,
+    user_id: int = None
+):
+    """상의 기준으로 어울리는 하의 또는 아우터 추천"""
+    
+    print(f"\n{'='*60}")
+    print(f"🤖 하의/아우터 매칭 추천 (기준 상의 ID: {item_id})")
+    print(f"  - 추천 개수: {n_results}")
+    print(f"  - 사용자 ID: {user_id}")
+    print(f"{'='*60}")
+    
+    if not pipeline or not pipeline.chroma_collection:
+        print("❌ AI 파이프라인 또는 ChromaDB 비활성화")
+        raise HTTPException(
+            status_code=503, 
+            detail="AI 추천 기능을 사용할 수 없습니다."
+        )
+    
+    try:
+        # 1. 기준 아이템 정보 가져오기
+        with pipeline.db_conn.cursor() as cur:
+            cur.execute("""
+                SELECT 
+                    w.original_image_path, 
+                    w.user_id,
+                    w.has_top,
+                    t.category as top_category,
+                    t.color as top_color
+                FROM wardrobe_items w
+                LEFT JOIN top_attributes t ON w.item_id = t.item_id
+                WHERE w.item_id = %s
+            """, (item_id,))
+            
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(
+                    status_code=404, 
+                    detail="기준 아이템을 찾을 수 없습니다."
+                )
+            
+            base_image_path, base_user_id, has_top, top_cat, top_color = row
+            
+            if not has_top:
+                raise HTTPException(
+                    status_code=400, 
+                    detail="선택한 아이템이 상의가 아닙니다."
+                )
+        
+        # 2. 사용자의 전체 옷장 아이템 개수 확인
+        with pipeline.db_conn.cursor() as cur:
+            cur.execute("""
+                SELECT COUNT(*) FROM wardrobe_items 
+                WHERE user_id = %s AND is_default = FALSE
+            """, (base_user_id,))
+            user_item_count = cur.fetchone()[0]
+        
+        print(f"  📊 사용자 옷장 아이템 개수: {user_item_count}개")
+        
+        # 3. 하의 또는 아우터 아이템들 검색
+        with pipeline.db_conn.cursor() as cur:
+            cur.execute("""
+                SELECT 
+                    w.item_id,
+                    w.original_image_path,
+                    w.user_id,
+                    w.has_bottom,
+                    w.has_outer,
+                    b.category as bottom_category,
+                    b.color as bottom_color,
+                    o.category as outer_category,
+                    o.color as outer_color
+                FROM wardrobe_items w
+                LEFT JOIN bottom_attributes b ON w.item_id = b.item_id AND w.has_bottom = TRUE
+                LEFT JOIN top_attributes o ON w.item_id = o.item_id AND w.has_outer = TRUE
+                WHERE w.user_id = %s 
+                AND (w.has_bottom = TRUE OR w.has_outer = TRUE)
+                AND w.item_id != %s
+            """, (base_user_id, item_id))
+            
+            candidate_items = cur.fetchall()
+        
+        # 4. 기본 아이템들도 함께 가져오기 (옷장이 20개 미만일 때)
+        default_items = []
+        if user_item_count < 20:
+            print(f"  🎯 옷장이 {user_item_count}개로 부족하여 기본 아이템도 추가합니다.")
+            with pipeline.db_conn.cursor() as cur:
+                cur.execute("""
+                    SELECT 
+                        w.item_id,
+                        w.original_image_path,
+                        w.user_id,
+                        w.has_bottom,
+                        w.has_outer,
+                        b.category as bottom_category,
+                        b.color as bottom_color,
+                        o.category as outer_category,
+                        o.color as outer_color
+                    FROM wardrobe_items w
+                    LEFT JOIN bottom_attributes b ON w.item_id = b.item_id AND w.has_bottom = TRUE
+                    LEFT JOIN top_attributes o ON w.item_id = o.item_id AND w.has_outer = TRUE
+                    WHERE w.is_default = TRUE
+                    AND (w.has_bottom = TRUE OR w.has_outer = TRUE)
+                    ORDER BY w.item_id
+                    LIMIT 5
+                """)
+                default_items = cur.fetchall()
+        
+        # 5. 모든 후보 아이템들 결합
+        all_candidates = list(candidate_items) + list(default_items)
+        
+        if not all_candidates:
+            return {
+                "success": True,
+                "recommendations": [],
+                "message": "추천할 하의 또는 아우터가 없습니다."
+            }
+        
+        # 6. AI 유사도 기반 추천 (간단한 구현)
+        recommendations = []
+        for item in all_candidates[:n_results]:
+            item_id, image_path, user_id, has_bottom, has_outer, bottom_cat, bottom_color, outer_cat, outer_color = item
+            
+            print(f"🔍 추천 아이템 {item_id}: image_path = {image_path}")
+            
+            # 이미지 경로가 None이면 건너뛰기
+            if not image_path:
+                print(f"⚠️ 아이템 {item_id}: 이미지 경로가 None입니다.")
+                continue
+            
+            # 카테고리와 색상 기반 매칭 점수 계산
+            score = 0.8  # 기본 점수
+            
+            if has_bottom and bottom_cat:
+                score += 0.1
+            if has_outer and outer_cat:
+                score += 0.1
+            
+            # 파일명만 추출 (기존 API와 동일한 방식)
+            if image_path:
+                filename = Path(image_path).name
+            else:
+                filename = f"item_{item_id}.jpg"
+            
+            # 기본 아이템인지 확인
+            is_default = item in default_items
+            
+            recommendations.append({
+                "id": item_id,
+                "image_path": filename,  # 기존 API와 동일한 필드명
+                "distance": 1.0 - score,  # 프론트엔드에서 사용하는 distance 필드 추가
+                "score": round(score, 2),
+                "category": "하의" if has_bottom else "아우터",
+                "name": f"{bottom_color or outer_color or ''} {bottom_cat or outer_cat or ''}".strip(),
+                "is_default": is_default
+            })
+        
+        print(f"✅ 추천 완료: {len(recommendations)}개")
+        return {
+            "success": True,
+            "recommendations": recommendations
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ 추천 오류: {e}")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"AI 추천 오류: {str(e)}"
+        )
+
+
+# ✅ 하의 → 상의 or 아우터+상의 추천
+@app.get("/api/recommendations/match-top-or-outer-top/{item_id}")
+def get_matching_top_or_outer_top(
+    item_id: int, 
+    n_results: int = 3,
+    user_id: int = None
+):
+    """하의 기준으로 어울리는 상의 또는 아우터+상의 추천"""
+    
+    print(f"\n{'='*60}")
+    print(f"🤖 상의/아우터+상의 매칭 추천 (기준 하의 ID: {item_id})")
+    print(f"  - 추천 개수: {n_results}")
+    print(f"  - 사용자 ID: {user_id}")
+    print(f"{'='*60}")
+    
+    if not pipeline or not pipeline.chroma_collection:
+        print("❌ AI 파이프라인 또는 ChromaDB 비활성화")
+        raise HTTPException(
+            status_code=503, 
+            detail="AI 추천 기능을 사용할 수 없습니다."
+        )
+    
+    try:
+        # 1. 기준 아이템 정보 가져오기
+        with pipeline.db_conn.cursor() as cur:
+            cur.execute("""
+                SELECT 
+                    w.original_image_path, 
+                    w.user_id,
+                    w.has_bottom,
+                    b.category as bottom_category,
+                    b.color as bottom_color
+                FROM wardrobe_items w
+                LEFT JOIN bottom_attributes b ON w.item_id = b.item_id
+                WHERE w.item_id = %s
+            """, (item_id,))
+            
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(
+                    status_code=404, 
+                    detail="기준 아이템을 찾을 수 없습니다."
+                )
+            
+            base_image_path, base_user_id, has_bottom, bottom_cat, bottom_color = row
+            
+            if not has_bottom:
+                raise HTTPException(
+                    status_code=400, 
+                    detail="선택한 아이템이 하의가 아닙니다."
+                )
+        
+        # 2. 사용자의 전체 옷장 아이템 개수 확인
+        with pipeline.db_conn.cursor() as cur:
+            cur.execute("""
+                SELECT COUNT(*) FROM wardrobe_items 
+                WHERE user_id = %s AND is_default = FALSE
+            """, (base_user_id,))
+            user_item_count = cur.fetchone()[0]
+        
+        print(f"  📊 사용자 옷장 아이템 개수: {user_item_count}개")
+        
+        # 3. 상의 또는 아우터 아이템들 검색
+        with pipeline.db_conn.cursor() as cur:
+            cur.execute("""
+                SELECT 
+                    w.item_id,
+                    w.original_image_path,
+                    w.user_id,
+                    w.has_top,
+                    w.has_outer,
+                    t.category as top_category,
+                    t.color as top_color,
+                    o.category as outer_category,
+                    o.color as outer_color
+                FROM wardrobe_items w
+                LEFT JOIN top_attributes t ON w.item_id = t.item_id AND w.has_top = TRUE
+                LEFT JOIN top_attributes o ON w.item_id = o.item_id AND w.has_outer = TRUE
+                WHERE w.user_id = %s 
+                AND (w.has_top = TRUE OR w.has_outer = TRUE)
+                AND w.item_id != %s
+            """, (base_user_id, item_id))
+            
+            candidate_items = cur.fetchall()
+        
+        # 4. 기본 아이템들도 함께 가져오기 (옷장이 20개 미만일 때)
+        default_items = []
+        if user_item_count < 20:
+            print(f"  🎯 옷장이 {user_item_count}개로 부족하여 기본 아이템도 추가합니다.")
+            with pipeline.db_conn.cursor() as cur:
+                cur.execute("""
+                    SELECT 
+                        w.item_id,
+                        w.original_image_path,
+                        w.user_id,
+                        w.has_top,
+                        w.has_outer,
+                        t.category as top_category,
+                        t.color as top_color,
+                        o.category as outer_category,
+                        o.color as outer_color
+                    FROM wardrobe_items w
+                    LEFT JOIN top_attributes t ON w.item_id = t.item_id AND w.has_top = TRUE
+                    LEFT JOIN top_attributes o ON w.item_id = o.item_id AND w.has_outer = TRUE
+                    WHERE w.is_default = TRUE
+                    AND (w.has_top = TRUE OR w.has_outer = TRUE)
+                    ORDER BY w.item_id
+                    LIMIT 5
+                """)
+                default_items = cur.fetchall()
+        
+        # 5. 모든 후보 아이템들 결합
+        all_candidates = list(candidate_items) + list(default_items)
+        
+        if not all_candidates:
+            return {
+                "success": True,
+                "recommendations": [],
+                "message": "추천할 상의 또는 아우터가 없습니다."
+            }
+        
+        # 6. AI 유사도 기반 추천
+        recommendations = []
+        for item in all_candidates[:n_results]:
+            item_id, image_path, user_id, has_top, has_outer, top_cat, top_color, outer_cat, outer_color = item
+            
+            print(f"🔍 추천 아이템 {item_id}: image_path = {image_path}")
+            
+            # 이미지 경로가 None이면 건너뛰기
+            if not image_path:
+                print(f"⚠️ 아이템 {item_id}: 이미지 경로가 None입니다.")
+                continue
+            
+            # 카테고리와 색상 기반 매칭 점수 계산
+            score = 0.8  # 기본 점수
+            
+            if has_top and top_cat:
+                score += 0.1
+            if has_outer and outer_cat:
+                score += 0.1
+            
+            # 파일명만 추출 (기존 API와 동일한 방식)
+            if image_path:
+                filename = Path(image_path).name
+            else:
+                filename = f"item_{item_id}.jpg"
+            
+            # 기본 아이템인지 확인
+            is_default = item in default_items
+            
+            recommendations.append({
+                "id": item_id,
+                "image_path": filename,  # 기존 API와 동일한 필드명
+                "distance": 1.0 - score,  # 프론트엔드에서 사용하는 distance 필드 추가
+                "score": round(score, 2),
+                "category": "상의" if has_top else "아우터",
+                "name": f"{top_color or outer_color or ''} {top_cat or outer_cat or ''}".strip(),
+                "is_default": is_default
+            })
+        
+        print(f"✅ 추천 완료: {len(recommendations)}개")
+        return {
+            "success": True,
+            "recommendations": recommendations
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ 추천 오류: {e}")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"AI 추천 오류: {str(e)}"
+        )
+
+
+# ✅ 아우터 → 상의 or 하의 or 상의+하의 추천
+@app.get("/api/recommendations/match-top-or-bottom-or-combo/{item_id}")
+def get_matching_top_or_bottom_or_combo(
+    item_id: int, 
+    n_results: int = 3,
+    user_id: int = None
+):
+    """아우터 기준으로 어울리는 상의, 하의, 또는 상의+하의 추천"""
+    
+    print(f"\n{'='*60}")
+    print(f"🤖 상의/하의/상의+하의 매칭 추천 (기준 아우터 ID: {item_id})")
+    print(f"  - 추천 개수: {n_results}")
+    print(f"  - 사용자 ID: {user_id}")
+    print(f"{'='*60}")
+    
+    if not pipeline or not pipeline.chroma_collection:
+        print("❌ AI 파이프라인 또는 ChromaDB 비활성화")
+        raise HTTPException(
+            status_code=503, 
+            detail="AI 추천 기능을 사용할 수 없습니다."
+        )
+    
+    try:
+        # 1. 기준 아이템 정보 가져오기
+        with pipeline.db_conn.cursor() as cur:
+            cur.execute("""
+                SELECT 
+                    w.original_image_path, 
+                    w.user_id,
+                    w.has_outer,
+                    t.category as outer_category,
+                    t.color as outer_color
+                FROM wardrobe_items w
+                LEFT JOIN top_attributes t ON w.item_id = t.item_id AND w.has_outer = TRUE
+                WHERE w.item_id = %s
+            """, (item_id,))
+            
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(
+                    status_code=404, 
+                    detail="기준 아이템을 찾을 수 없습니다."
+                )
+            
+            base_image_path, base_user_id, has_outer, outer_cat, outer_color = row
+            
+            if not has_outer:
+                raise HTTPException(
+                    status_code=400, 
+                    detail="선택한 아이템이 아우터가 아닙니다."
+                )
+        
+        # 2. 사용자의 전체 옷장 아이템 개수 확인
+        with pipeline.db_conn.cursor() as cur:
+            cur.execute("""
+                SELECT COUNT(*) FROM wardrobe_items 
+                WHERE user_id = %s AND is_default = FALSE
+            """, (base_user_id,))
+            user_item_count = cur.fetchone()[0]
+        
+        print(f"  📊 사용자 옷장 아이템 개수: {user_item_count}개")
+        
+        # 3. 상의, 하의, 또는 상의+하의 아이템들 검색
+        with pipeline.db_conn.cursor() as cur:
+            cur.execute("""
+                SELECT 
+                    w.item_id,
+                    w.original_image_path,
+                    w.user_id,
+                    w.has_top,
+                    w.has_bottom,
+                    t.category as top_category,
+                    t.color as top_color,
+                    b.category as bottom_category,
+                    b.color as bottom_color
+                FROM wardrobe_items w
+                LEFT JOIN top_attributes t ON w.item_id = t.item_id AND w.has_top = TRUE
+                LEFT JOIN bottom_attributes b ON w.item_id = b.item_id AND w.has_bottom = TRUE
+                WHERE w.user_id = %s 
+                AND (w.has_top = TRUE OR w.has_bottom = TRUE)
+                AND w.item_id != %s
+            """, (base_user_id, item_id))
+            
+            candidate_items = cur.fetchall()
+        
+        # 4. 기본 아이템들도 함께 가져오기 (옷장이 20개 미만일 때)
+        default_items = []
+        if user_item_count < 20:
+            print(f"  🎯 옷장이 {user_item_count}개로 부족하여 기본 아이템도 추가합니다.")
+            with pipeline.db_conn.cursor() as cur:
+                cur.execute("""
+                    SELECT 
+                        w.item_id,
+                        w.original_image_path,
+                        w.user_id,
+                        w.has_top,
+                        w.has_bottom,
+                        t.category as top_category,
+                        t.color as top_color,
+                        b.category as bottom_category,
+                        b.color as bottom_color
+                    FROM wardrobe_items w
+                    LEFT JOIN top_attributes t ON w.item_id = t.item_id AND w.has_top = TRUE
+                    LEFT JOIN bottom_attributes b ON w.item_id = b.item_id AND w.has_bottom = TRUE
+                    WHERE w.is_default = TRUE
+                    AND (w.has_top = TRUE OR w.has_bottom = TRUE)
+                    ORDER BY w.item_id
+                    LIMIT 5
+                """)
+                default_items = cur.fetchall()
+        
+        # 5. 모든 후보 아이템들 결합
+        all_candidates = list(candidate_items) + list(default_items)
+        
+        if not all_candidates:
+            return {
+                "success": True,
+                "recommendations": [],
+                "message": "추천할 상의, 하의, 또는 상의+하의가 없습니다."
+            }
+        
+        # 6. AI 유사도 기반 추천
+        recommendations = []
+        for item in all_candidates[:n_results]:
+            item_id, image_path, user_id, has_top, has_bottom, top_cat, top_color, bottom_cat, bottom_color = item
+            
+            print(f"🔍 추천 아이템 {item_id}: image_path = {image_path}")
+            
+            # 이미지 경로가 None이면 건너뛰기
+            if not image_path:
+                print(f"⚠️ 아이템 {item_id}: 이미지 경로가 None입니다.")
+                continue
+            
+            # 카테고리와 색상 기반 매칭 점수 계산
+            score = 0.8  # 기본 점수
+            
+            if has_top and top_cat:
+                score += 0.1
+            if has_bottom and bottom_cat:
+                score += 0.1
+            
+            # 카테고리 결정
+            if has_top and has_bottom:
+                category = "상의+하의"
+                name = f"{top_color or ''} {top_cat or ''} + {bottom_color or ''} {bottom_cat or ''}".strip()
+            elif has_top:
+                category = "상의"
+                name = f"{top_color or ''} {top_cat or ''}".strip()
+            else:
+                category = "하의"
+                name = f"{bottom_color or ''} {bottom_cat or ''}".strip()
+            
+            # 파일명만 추출 (기존 API와 동일한 방식)
+            if image_path:
+                filename = Path(image_path).name
+            else:
+                filename = f"item_{item_id}.jpg"
+            
+            # 기본 아이템인지 확인
+            is_default = item in default_items
+            
+            recommendations.append({
+                "id": item_id,
+                "image_path": filename,  # 기존 API와 동일한 필드명
+                "distance": 1.0 - score,  # 프론트엔드에서 사용하는 distance 필드 추가
+                "score": round(score, 2),
+                "category": category,
+                "name": name,
+                "is_default": is_default
+            })
+        
+        print(f"✅ 추천 완료: {len(recommendations)}개")
+        return {
+            "success": True,
+            "recommendations": recommendations
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ 추천 오류: {e}")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"AI 추천 오류: {str(e)}"
+        )
+
+
+# ✅ 드레스 기반 추천 API (하의 또는 아우터 추천)
+@app.get("/api/recommendations/match-bottom-or-outer-for-dress/{item_id}")
+def get_recommendations_for_dress(item_id: int, n_results: int = 3, user_id: int = 1):
+    """드레스 아이템에 맞는 하의 또는 아우터 추천"""
+    
+    print(f"\n{'='*60}")
+    print(f"👗 드레스 기반 추천 요청 (item_id: {item_id}, user_id: {user_id})")
+    print(f"{'='*60}")
+    
+    try:
+        # 1. 기본 아이템 정보 확인
+        with pipeline.db_conn.cursor() as cur:
+            cur.execute("""
+                SELECT w.item_id, w.user_id, w.has_dress, d.category, d.color
+                FROM wardrobe_items w
+                LEFT JOIN top_attributes d ON w.item_id = d.item_id AND w.has_dress = TRUE
+                WHERE w.item_id = %s
+            """, (item_id,))
+            
+            base_item = cur.fetchone()
+            if not base_item:
+                raise HTTPException(
+                    status_code=404, 
+                    detail="아이템을 찾을 수 없습니다."
+                )
+            
+            base_user_id = base_item[1]
+            has_dress = base_item[2]
+            dress_category = base_item[3]
+            dress_color = base_item[4]
+            
+            print(f"  📋 기본 아이템: {dress_color or ''} {dress_category or ''} (드레스)")
+            
+            if not has_dress:
+                raise HTTPException(
+                    status_code=400, 
+                    detail="선택한 아이템이 드레스가 아닙니다."
+                )
+        
+        # 2. 사용자의 전체 옷장 아이템 개수 확인
+        with pipeline.db_conn.cursor() as cur:
+            cur.execute("""
+                SELECT COUNT(*) FROM wardrobe_items 
+                WHERE user_id = %s AND is_default = FALSE
+            """, (base_user_id,))
+            user_item_count = cur.fetchone()[0]
+        
+        print(f"  📊 사용자 옷장 아이템 개수: {user_item_count}개")
+        
+        # 3. 하의 또는 아우터 아이템들 검색
+        with pipeline.db_conn.cursor() as cur:
+            cur.execute("""
+                SELECT 
+                    w.item_id,
+                    w.original_image_path,
+                    w.user_id,
+                    w.has_bottom,
+                    w.has_outer,
+                    b.category as bottom_category,
+                    b.color as bottom_color,
+                    o.category as outer_category,
+                    o.color as outer_color
+                FROM wardrobe_items w
+                LEFT JOIN bottom_attributes b ON w.item_id = b.item_id AND w.has_bottom = TRUE
+                LEFT JOIN top_attributes o ON w.item_id = o.item_id AND w.has_outer = TRUE
+                WHERE w.user_id = %s 
+                AND (w.has_bottom = TRUE OR w.has_outer = TRUE)
+                AND w.item_id != %s
+            """, (base_user_id, item_id))
+            
+            candidate_items = cur.fetchall()
+        
+        # 4. 기본 아이템들도 함께 가져오기 (옷장이 20개 미만일 때)
+        default_items = []
+        if user_item_count < 20:
+            print(f"  🎯 옷장이 {user_item_count}개로 부족하여 기본 아이템도 추가합니다.")
+            with pipeline.db_conn.cursor() as cur:
+                cur.execute("""
+                    SELECT 
+                        w.item_id,
+                        w.original_image_path,
+                        w.user_id,
+                        w.has_bottom,
+                        w.has_outer,
+                        b.category as bottom_category,
+                        b.color as bottom_color,
+                        o.category as outer_category,
+                        o.color as outer_color
+                    FROM wardrobe_items w
+                    LEFT JOIN bottom_attributes b ON w.item_id = b.item_id AND w.has_bottom = TRUE
+                    LEFT JOIN top_attributes o ON w.item_id = o.item_id AND w.has_outer = TRUE
+                    WHERE w.is_default = TRUE
+                    AND (w.has_bottom = TRUE OR w.has_outer = TRUE)
+                    ORDER BY w.item_id
+                    LIMIT 5
+                """)
+                default_items = cur.fetchall()
+        
+        # 5. 모든 후보 아이템들 결합
+        all_candidates = list(candidate_items) + list(default_items)
+        
+        if not all_candidates:
+            return {
+                "success": True,
+                "recommendations": [],
+                "message": "추천할 하의 또는 아우터가 없습니다."
+            }
+        
+        # 6. AI 유사도 기반 추천 (간단한 구현)
+        recommendations = []
+        for item in all_candidates[:n_results]:
+            item_id, image_path, user_id, has_bottom, has_outer, bottom_cat, bottom_color, outer_cat, outer_color = item
+            
+            print(f"🔍 추천 아이템 {item_id}: image_path = {image_path}")
+            
+            # 이미지 경로가 None이면 건너뛰기
+            if not image_path:
+                print(f"  ⚠️ 이미지 경로가 None입니다. 건너뜁니다.")
+                continue
+            
+            # 간단한 유사도 점수 계산 (실제로는 AI 모델 사용)
+            score = 0.8  # 기본 점수
+            
+            # 파일명만 추출 (기존 API와 동일한 방식)
+            if image_path:
+                filename = Path(image_path).name
+            else:
+                filename = f"item_{item_id}.jpg"
+            
+            # 기본 아이템인지 확인
+            is_default = item in default_items
+            
+            recommendations.append({
+                "id": item_id,
+                "image_path": filename,  # 기존 API와 동일한 필드명
+                "distance": 1.0 - score,  # 프론트엔드에서 사용하는 distance 필드 추가
+                "score": round(score, 2),
+                "category": "하의" if has_bottom else "아우터",
+                "name": f"{bottom_color or outer_color or ''} {bottom_cat or outer_cat or ''}".strip(),
+                "is_default": is_default
+            })
+        
+        print(f"✅ 추천 완료: {len(recommendations)}개")
+        return {
+            "success": True,
+            "recommendations": recommendations
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ 추천 오류: {e}")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"AI 추천 오류: {str(e)}"
+        )
+
+
+# ✅ 기본 아이템 추천 조회 API
+@app.get("/api/recommendations/default/{user_id}")
+def get_default_recommendations(user_id: int):
+    """사용자에게 추천된 기본 아이템들 조회"""
+    
+    print(f"\n{'='*60}")
+    print(f"🎯 기본 아이템 추천 조회 (user_id: {user_id})")
+    print(f"{'='*60}")
+    
+    try:
+        with pipeline.db_conn.cursor() as cur:
+            # 1. 사용자의 기본 아이템 추천 목록 가져오기
+            cur.execute("""
+                SELECT 
+                    w.item_id,
+                    w.original_image_path,
+                    w.has_top,
+                    w.has_bottom,
+                    w.has_outer,
+                    w.has_dress,
+                    t.category as top_category,
+                    t.color as top_color,
+                    b.category as bottom_category,
+                    b.color as bottom_color,
+                    o.category as outer_category,
+                    o.color as outer_color,
+                    d.category as dress_category,
+                    d.color as dress_color,
+                    ur.created_at
+                FROM user_recommendations ur
+                JOIN wardrobe_items w ON ur.item_id = w.item_id
+                LEFT JOIN top_attributes t ON w.item_id = t.item_id AND w.has_top = TRUE
+                LEFT JOIN bottom_attributes b ON w.item_id = b.item_id AND w.has_bottom = TRUE
+                LEFT JOIN top_attributes o ON w.item_id = o.item_id AND w.has_outer = TRUE
+                LEFT JOIN top_attributes d ON w.item_id = d.item_id AND w.has_dress = TRUE
+                WHERE ur.user_id = %s 
+                AND ur.recommendation_type = 'default_item'
+                ORDER BY ur.created_at DESC
+            """, (user_id,))
+            
+            recommendations = cur.fetchall()
+        
+        if not recommendations:
+            return {
+                "success": True,
+                "recommendations": [],
+                "message": "추천된 기본 아이템이 없습니다."
+            }
+        
+        # 2. 추천 아이템 데이터 변환
+        result_items = []
+        for rec in recommendations:
+            item_id, image_path, has_top, has_bottom, has_outer, has_dress, top_cat, top_color, bottom_cat, bottom_color, outer_cat, outer_color, dress_cat, dress_color, created_at = rec
+            
+            # 우선순위: 드레스 > 아우터 > 상의 > 하의
+            if has_dress:
+                name = f"{dress_color or ''} {dress_cat or ''}".strip()
+                category = "드레스"
+            elif has_outer:
+                name = f"{outer_color or ''} {outer_cat or ''}".strip()
+                category = "아우터"
+            elif has_top:
+                name = f"{top_color or ''} {top_cat or ''}".strip()
+                category = "상의"
+            elif has_bottom:
+                name = f"{bottom_color or ''} {bottom_cat or ''}".strip()
+                category = "하의"
+            else:
+                name = "기본 아이템"
+                category = "기타"
+            
+            # 파일명 추출 (기존 API와 동일한 방식)
+            if image_path:
+                filename = Path(image_path).name
+            else:
+                filename = f"item_{item_id}.jpg"
+            
+            result_items.append({
+                "id": item_id,
+                "name": name,
+                "category": category,
+                "image_path": filename,  # 기존 API와 동일한 필드명
+                "distance": 0.2,  # 기본 아이템은 낮은 distance (높은 유사도)
+                "has_top": has_top,
+                "has_bottom": has_bottom,
+                "has_outer": has_outer,
+                "has_dress": has_dress,
+                "recommended_at": created_at.isoformat() if created_at else None,
+                "is_default": True
+            })
+        
+        print(f"✅ 추천 아이템 {len(result_items)}개 조회 완료")
+        return {
+            "success": True,
+            "recommendations": result_items
+        }
+        
+    except Exception as e:
+        print(f"❌ 추천 조회 오류: {e}")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"추천 조회 오류: {str(e)}"
+        )
 
 
 # 💬 대화 히스토리 초기화 API

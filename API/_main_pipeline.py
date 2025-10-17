@@ -13,6 +13,14 @@ from psycopg2.extras import Json
 import json
 from typing import Dict, Tuple, Optional
 
+# Background Remover 관련 import
+try:
+    from rembg import remove, new_session
+    REMBG_AVAILABLE = True
+except ImportError:
+    print("⚠️ rembg가 설치되지 않았습니다. Background Remover 기능을 사용할 수 없습니다.")
+    REMBG_AVAILABLE = False
+
 # GPU 설정
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"사용 디바이스: {DEVICE}")
@@ -23,19 +31,45 @@ class FashionPipeline:
     
     def __init__(self, 
                 yolo_pose_path: str = "./API/pre_trained_weights/yolo11n-pose.pt",
+                yolo_detection_path: str = "./API/pre_trained_weights/yolo_best.pt",
                 # top_model_path: str = "./API/pre_trained_weights/fashion_top_model.pth",
-                top_model_path: str = "./API/pre_trained_weights/fashion_attr_resnet50_epochs200_best.pth",
+                top_model_path: str = "./API/pre_trained_weights/fashion_top_model_1017.pth",
                 # bottom_model_path: str = "./API/pre_trained_weights/fashion_bottom_model.pth",
-                bottom_model_path: str = "./API/pre_trained_weights/fashion_attr_resnet50_epochs200_best.pth",
+                bottom_model_path: str = "./API/pre_trained_weights/fashion_bottom_model_1017.pth",
                 chroma_path: str = "./chroma_db",
                 db_config: dict = None):
         """초기화"""
         
         print("\n=== 모델 로딩 중 ===")
         
-        # 1. YOLO Pose 모델
-        print("1. YOLO Pose 로드...")
-        self.yolo_model = YOLO(yolo_pose_path)
+        # 1. YOLO Pose 모델 (선택적)
+        if yolo_pose_path:
+            print("1. YOLO Pose 로드...")
+            self.yolo_model = YOLO(yolo_pose_path)
+        else:
+            print("1. YOLO Pose 건너뛰기...")
+            self.yolo_model = None
+        
+        # 1-1. YOLO Detection 모델 (상의/하의/아우터/드레스 분류)
+        print("1-1. YOLO Detection 로드...")
+        self.yolo_detection_model = YOLO(yolo_detection_path)
+        
+        # 1-2. Background Remover (누끼따기)
+        if REMBG_AVAILABLE:
+            print("1-2. Background Remover 초기화...")
+            try:
+                # Background Remover 세션 초기화 (u2net 모델 사용)
+                self.rembg_session = new_session('u2net')
+                self.rembg_available = True
+                print("✅ Background Remover 초기화 완료!")
+            except Exception as e:
+                print(f"⚠️ Background Remover 초기화 실패: {e}")
+                self.rembg_session = None
+                self.rembg_available = False
+        else:
+            print("1-2. Background Remover 건너뛰기...")
+            self.rembg_session = None
+            self.rembg_available = False
         
         # 2. 상의 모델 로드
         print("2. 상의 모델 로드...")
@@ -102,15 +136,136 @@ class FashionPipeline:
                 'user': 'postgres',
                 'password': '000000'
             }
+        self.db_config = db_config  # 연결 정보 저장
         self.db_conn = psycopg2.connect(**db_config)
         
         print("\n✓ 모든 모델 로드 완료\n")
     
+    def reconnect_db(self):
+        """데이터베이스 연결 재시도"""
+        try:
+            if hasattr(self, 'db_conn') and self.db_conn:
+                self.db_conn.close()
+        except:
+            pass
+        
+        try:
+            self.db_conn = psycopg2.connect(**self.db_config)
+            print("✅ 데이터베이스 재연결 성공")
+        except Exception as e:
+            print(f"❌ 데이터베이스 재연결 실패: {e}")
+            raise
     
+    def detect_fashion_categories(self, image_path: str) -> Dict:
+        """YOLO Detection으로 상의/하의/아우터/드레스 4개 카테고리 분류"""
+        
+        print(f"[1/6] YOLO Detection으로 카테고리 분류 중: {image_path}")
+        
+        # 이미지 로드
+        image = cv2.imread(image_path)
+        if image is None:
+            raise ValueError(f"이미지를 열 수 없습니다: {image_path}")
+        
+        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        
+        # YOLO Detection 추론
+        results = self.yolo_detection_model(image_path, verbose=False)
+        
+        detected_items = {
+            'top': [],
+            'bottom': [],
+            'outer': [],
+            'dress': []
+        }
+        
+        # 🔍 디버깅: YOLO 원본 결과 출력
+        print(f"  🔍 YOLO 원본 결과: {len(results[0].boxes)}개 객체 감지")
+        if len(results[0].boxes) > 0:
+            for i, box in enumerate(results[0].boxes):
+                class_id = int(box.cls[0])
+                confidence = float(box.conf[0])
+                print(f"    - 객체 {i}: class_id={class_id}, confidence={confidence:.3f}")
+        
+        if len(results[0].boxes) > 0:
+            boxes = results[0].boxes
+            for i, box in enumerate(boxes):
+                # 클래스 ID와 신뢰도
+                class_id = int(box.cls[0])
+                confidence = float(box.conf[0])
+                
+                # 클래스 이름 매핑 (yolo_best.pt 모델의 클래스 순서에 따라)
+                # 실제 모델 클래스 순서: ['outer', 'top', 'bottom', 'dress'] (로그 기반 추정)
+                class_names = ['outer', 'top', 'bottom', 'dress']
+                
+                if class_id < len(class_names) and confidence > 0.3:  # 신뢰도 임계값 낮춤
+                    class_name = class_names[class_id]
+                    
+                    # 바운딩 박스 좌표
+                    x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+                    x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
+                    
+                    # 이미지 크롭
+                    cropped_image = image_rgb[y1:y2, x1:x2]
+                    
+                    detected_items[class_name].append({
+                        'bbox': (x1, y1, x2, y2),
+                        'confidence': confidence,
+                        'cropped_image': cropped_image
+                    })
+                    
+                    print(f"  - class_id={class_id}, {class_name}: confidence={confidence:.2f}, bbox=({x1},{y1},{x2},{y2})")
+        
+        # 모든 감지된 의류를 포함 (다중 의류 감지 지원)
+        final_items = {}
+        for category, items in detected_items.items():
+            if items:
+                # 신뢰도 기준으로 정렬하여 가장 높은 것 선택
+                best_item = max(items, key=lambda x: x['confidence'])
+                final_items[category] = best_item
+                print(f"  ✅ {category} 선택: confidence={best_item['confidence']:.2f}")
+        
+        # 🔍 디버깅: 감지된 모든 아이템 출력
+        print(f"  📊 총 감지된 카테고리: {list(final_items.keys())}")
+        for category, item in final_items.items():
+            bbox = item['bbox']
+            print(f"    - {category}: bbox=({bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]})")
+        
+        # 🔍 디버깅: 최종 결과 확인
+        has_top = 'top' in final_items
+        has_bottom = 'bottom' in final_items
+        has_outer = 'outer' in final_items
+        has_dress = 'dress' in final_items
+        
+        print(f"  🔍 최종 Detection 결과:")
+        print(f"    - has_top: {has_top}")
+        print(f"    - has_bottom: {has_bottom}")
+        print(f"    - has_outer: {has_outer}")
+        print(f"    - has_dress: {has_dress}")
+        
+        return {
+            'original': image_rgb,
+            'detected_items': final_items,
+            'has_top': has_top,
+            'has_bottom': has_bottom,
+            'has_outer': has_outer,
+            'has_dress': has_dress
+        }
+
     def separate_top_bottom(self, image_path: str) -> Dict:
         """1단계: YOLO Pose로 상/하의 분리"""
         
         print(f"[1/6] 이미지 분리 중: {image_path}")
+        
+        # YOLO Pose 모델이 없으면 전체 이미지만 반환
+        if self.yolo_model is None:
+            print("  ⚠️ YOLO Pose 모델이 없어서 전체 이미지만 사용합니다.")
+            return {
+                'original': image_path,
+                'top': None,
+                'bottom': None,
+                'has_top': False,
+                'has_bottom': False
+            }
         
         # 이미지 로드
         image = cv2.imread(image_path)
@@ -246,9 +401,11 @@ class FashionPipeline:
     
     
     def save_to_postgresql(self, user_id: int, image_path: str, 
-                        separation_result: Dict, 
+                        detection_result: Dict, 
                         top_attrs: Dict = None, 
                         bottom_attrs: Dict = None,
+                        outer_attrs: Dict = None,
+                        dress_attrs: Dict = None,
                         chroma_id: str = None) -> int:
         """4단계: PostgreSQL에 저장"""
         
@@ -266,23 +423,24 @@ class FashionPipeline:
                 cur.execute("""
                     INSERT INTO wardrobe_items (
                         user_id, original_image_path, 
-                        has_top, has_bottom,
-                        waist_y, chroma_embedding_id
-                    ) VALUES (%s, %s, %s, %s, %s, %s)
+                        has_top, has_bottom, has_outer, has_dress,
+                        chroma_embedding_id
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s)
                     RETURNING item_id
                 """, (
                     user_id, 
                     image_path,
-                    separation_result['has_top'],
-                    separation_result['has_bottom'],
-                    separation_result['waist_y'],
+                    detection_result['has_top'],
+                    detection_result['has_bottom'],
+                    detection_result['has_outer'],
+                    detection_result['has_dress'],
                     chroma_id
                 ))
                 
                 item_id = cur.fetchone()[0]
                 
                 # 상의 속성
-                if top_attrs and separation_result['has_top']:
+                if top_attrs and detection_result['has_top']:
                     cur.execute("""
                         INSERT INTO top_attributes (
                             item_id, category, color, fit, materials,
@@ -300,7 +458,7 @@ class FashionPipeline:
                     ))
                 
                 # 하의 속성
-                if bottom_attrs and separation_result['has_bottom']:
+                if bottom_attrs and detection_result['has_bottom']:
                     cur.execute("""
                         INSERT INTO bottom_attributes (
                             item_id, category, color, fit, materials,
@@ -315,6 +473,42 @@ class FashionPipeline:
                         bottom_attrs['category_confidence'],
                         bottom_attrs['color_confidence'],
                         bottom_attrs['fit_confidence']
+                    ))
+                
+                # 아우터 속성 (top_attributes 테이블에 저장)
+                if outer_attrs and detection_result['has_outer']:
+                    cur.execute("""
+                        INSERT INTO top_attributes (
+                            item_id, category, color, fit, materials,
+                            category_confidence, color_confidence, fit_confidence
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    """, (
+                        item_id,
+                        outer_attrs['category'],
+                        outer_attrs['color'],
+                        outer_attrs['fit'],
+                        Json(outer_attrs['materials']),
+                        outer_attrs['category_confidence'],
+                        outer_attrs['color_confidence'],
+                        outer_attrs['fit_confidence']
+                    ))
+                
+                # 드레스 속성 (top_attributes 테이블에 저장)
+                if dress_attrs and detection_result['has_dress']:
+                    cur.execute("""
+                        INSERT INTO top_attributes (
+                            item_id, category, color, fit, materials,
+                            category_confidence, color_confidence, fit_confidence
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    """, (
+                        item_id,
+                        dress_attrs['category'],
+                        dress_attrs['color'],
+                        dress_attrs['fit'],
+                        Json(dress_attrs['materials']),
+                        dress_attrs['category_confidence'],
+                        dress_attrs['color_confidence'],
+                        dress_attrs['fit_confidence']
                     ))
                 
                 # ✅ 커밋
@@ -376,6 +570,37 @@ class FashionPipeline:
         print(f"  - 검색 완료: {len(results['ids'][0])}개")
         return results
     
+    def remove_background_with_rembg(self, image: np.ndarray) -> np.ndarray:
+        """
+        Background Remover를 사용하여 배경 제거
+        
+        Args:
+            image: 입력 이미지 (RGB)
+        
+        Returns:
+            transparent_image: 투명 배경 이미지 (RGBA)
+        """
+        if not self.rembg_available:
+            print("⚠️ Background Remover가 사용 불가능합니다.")
+            return None
+        
+        try:
+            # PIL Image로 변환
+            pil_image = Image.fromarray(image)
+            
+            # Background Remover로 배경 제거
+            transparent_image = remove(pil_image, session=self.rembg_session)
+            
+            # numpy array로 변환
+            transparent_array = np.array(transparent_image)
+            
+            return transparent_array
+            
+        except Exception as e:
+            print(f"❌ Background Remover 처리 실패: {e}")
+            return None
+    
+    
     
     def process_image(self, image_path: str, user_id: int, 
                     save_separated_images: bool = False) -> Dict:
@@ -386,37 +611,65 @@ class FashionPipeline:
         print(f"{'='*60}\n")
         
         try:
-            # 1. 이미지 분리
-            separation = self.separate_top_bottom(image_path)
+            # 1. YOLO Detection으로 카테고리 분류
+            detection_result = self.detect_fashion_categories(image_path)
             
-            # 2. ✅ 속성 예측 - 자른 이미지를 각각 모델에 입력!
+            # 2. ✅ 속성 예측 - YOLO Detection으로 크롭된 이미지를 각각 모델에 입력!
+            print(f"  🔍 Detection 결과 확인:")
+            print(f"    - has_top: {detection_result['has_top']}")
+            print(f"    - has_bottom: {detection_result['has_bottom']}")
+            print(f"    - has_outer: {detection_result['has_outer']}")
+            print(f"    - has_dress: {detection_result['has_dress']}")
+            
             top_attrs = None
             bottom_attrs = None
+            outer_attrs = None
+            dress_attrs = None
             
-            if separation['has_top']:
+            if detection_result['has_top']:
                 # 상의 이미지를 상의 모델에 입력
                 print("[2-1/6] 상의 이미지로 상의 속성 예측...")
                 top_attrs = self.predict_attributes(
-                    separation['top'],  # ✅ 자른 상의 이미지
+                    detection_result['detected_items']['top']['cropped_image'],
                     is_top=True
                 )
             
-            if separation['has_bottom']:
+            if detection_result['has_bottom']:
                 # 하의 이미지를 하의 모델에 입력
                 print("[2-2/6] 하의 이미지로 하의 속성 예측...")
                 bottom_attrs = self.predict_attributes(
-                    separation['bottom'],  # ✅ 자른 하의 이미지
+                    detection_result['detected_items']['bottom']['cropped_image'],
                     is_top=False
                 )
             
+            if detection_result['has_outer']:
+                # 아우터 이미지를 상의 모델에 입력 (아우터도 상의 계열)
+                print("[2-3/6] 아우터 이미지로 아우터 속성 예측...")
+                print(f"  🔍 아우터 이미지 크기: {detection_result['detected_items']['outer']['cropped_image'].shape}")
+                outer_attrs = self.predict_attributes(
+                    detection_result['detected_items']['outer']['cropped_image'],
+                    is_top=True
+                )
+                print(f"  ✅ 아우터 속성 예측 완료: {outer_attrs['category'] if outer_attrs else 'None'}")
+            
+            if detection_result['has_dress']:
+                # 드레스 이미지를 상의 모델에 입력 (드레스는 전체 의류)
+                print("[2-4/6] 드레스 이미지로 드레스 속성 예측...")
+                dress_attrs = self.predict_attributes(
+                    detection_result['detected_items']['dress']['cropped_image'],
+                    is_top=True
+                )
+            
             # 3. 임베딩 생성 (원본 전체 이미지로)
-            embedding = self.create_embedding(separation['original'])
+            embedding = self.create_embedding(detection_result['original'])
             
             # 4. 메타데이터 준비
             metadata = {
                 'user_id': str(user_id),
-                'has_top': str(separation['has_top']),
-                'has_bottom': str(separation['has_bottom'])
+                'has_top': str(detection_result['has_top']),
+                'has_bottom': str(detection_result['has_bottom']),
+                'has_outer': str(detection_result['has_outer']),
+                'has_dress': str(detection_result['has_dress'])
             }
             
             if top_attrs:
@@ -429,10 +682,20 @@ class FashionPipeline:
                 metadata['bottom_color'] = bottom_attrs['color']
                 metadata['bottom_fit'] = bottom_attrs['fit']
             
+            if outer_attrs:
+                metadata['outer_category'] = outer_attrs['category']
+                metadata['outer_color'] = outer_attrs['color']
+                metadata['outer_fit'] = outer_attrs['fit']
+            
+            if dress_attrs:
+                metadata['dress_category'] = dress_attrs['category']
+                metadata['dress_color'] = dress_attrs['color']
+                metadata['dress_fit'] = dress_attrs['fit']
+            
             # 5. PostgreSQL 저장 (chroma_id는 나중에 업데이트)
             item_id = self.save_to_postgresql(
-                user_id, image_path, separation, 
-                top_attrs, bottom_attrs, 
+                user_id, image_path, detection_result, 
+                top_attrs, bottom_attrs, outer_attrs, dress_attrs,
                 chroma_id=None
             )
             
@@ -459,7 +722,8 @@ class FashionPipeline:
                     'full': base_dir / 'full',
                     'top': base_dir / 'top',
                     'bottom': base_dir / 'bottom',
-                    'outer': base_dir / 'outer'
+                    'outer': base_dir / 'outer',
+                    'dress': base_dir / 'dress'
                 }
                 
                 for folder in folders.values():
@@ -467,30 +731,72 @@ class FashionPipeline:
                 
                 # 전체 이미지 저장
                 full_path = folders['full'] / f"item_{item_id}_full.jpg"
-                Image.fromarray(separation['original']).save(full_path)
+                Image.fromarray(detection_result['original']).save(full_path)
                 print(f"  ✅ 전체 이미지 저장: {full_path}")
                 
-                # 상의 저장 (카테고리에 따라 분류)
-                if separation['has_top'] and top_attrs:
-                    category = top_attrs['category'].lower()
-                    
-                    # 아우터 판단
-                    outer_keywords = ['coat', 'jacket', 'blazer', 'cardigan', 'jumper']
-                    is_outer = any(keyword in category for keyword in outer_keywords)
-                    
-                    if is_outer:
-                        top_path = folders['outer'] / f"item_{item_id}_outer.jpg"
-                    else:
-                        top_path = folders['top'] / f"item_{item_id}_top.jpg"
-                    
-                    Image.fromarray(separation['top']).save(top_path)
+                # YOLO Detection으로 크롭된 각 카테고리별 이미지 저장
+                if detection_result['has_top']:
+                    top_path = folders['top'] / f"item_{item_id}_top.jpg"
+                    Image.fromarray(detection_result['detected_items']['top']['cropped_image']).save(top_path)
                     print(f"  ✅ 상의 저장: {top_path}")
                 
-                # 하의 저장
-                if separation['has_bottom']:
+                if detection_result['has_bottom']:
                     bottom_path = folders['bottom'] / f"item_{item_id}_bottom.jpg"
-                    Image.fromarray(separation['bottom']).save(bottom_path)
+                    Image.fromarray(detection_result['detected_items']['bottom']['cropped_image']).save(bottom_path)
                     print(f"  ✅ 하의 저장: {bottom_path}")
+                
+                if detection_result['has_outer']:
+                    outer_path = folders['outer'] / f"item_{item_id}_outer.jpg"
+                    Image.fromarray(detection_result['detected_items']['outer']['cropped_image']).save(outer_path)
+                    print(f"  ✅ 아우터 저장: {outer_path}")
+                
+                if detection_result['has_dress']:
+                    dress_path = folders['dress'] / f"item_{item_id}_dress.jpg"
+                    Image.fromarray(detection_result['detected_items']['dress']['cropped_image']).save(dress_path)
+                    print(f"  ✅ 드레스 저장: {dress_path}")
+                
+                # 🎭 Background Remover로 누끼따기 이미지 저장 (마네킹 합성용)
+                if self.rembg_available:
+                    sam_folders = {
+                        'top_segmented': base_dir / 'top_segmented',
+                        'bottom_segmented': base_dir / 'bottom_segmented',
+                        'outer_segmented': base_dir / 'outer_segmented',
+                        'dress_segmented': base_dir / 'dress_segmented'
+                    }
+                    
+                    for folder in sam_folders.values():
+                        folder.mkdir(parents=True, exist_ok=True)
+                    
+                    # 각 카테고리별로 Background Remover 수행
+                    categories = [
+                        ('top', 'top_segmented', detection_result['has_top']),
+                        ('bottom', 'bottom_segmented', detection_result['has_bottom']),
+                        ('outer', 'outer_segmented', detection_result['has_outer']),
+                        ('dress', 'dress_segmented', detection_result['has_dress'])
+                    ]
+                    
+                    for category, rembg_folder, has_item in categories:
+                        if has_item:
+                            try:
+                                # bbox 크롭 이미지 가져오기
+                                cropped_image = detection_result['detected_items'][category]['cropped_image']
+                                
+                                # Background Remover로 배경 제거
+                                transparent_image = self.remove_background_with_rembg(cropped_image)
+                                
+                                if transparent_image is not None:
+                                    # PNG로 저장
+                                    rembg_path = sam_folders[rembg_folder] / f"item_{item_id}_{category}_segmented.png"
+                                    Image.fromarray(transparent_image, 'RGBA').save(rembg_path)
+                                    print(f"  🎭 {category} 누끼따기 저장: {rembg_path}")
+                                else:
+                                    print(f"  ⚠️ {category} Background Remover 실패")
+                                    
+                            except Exception as e:
+                                print(f"  ❌ {category} Background Remover 처리 오류: {e}")
+                else:
+                    print("  ⚠️ Background Remover가 사용 불가능하여 누끼따기 건너뛰기")
+                    print("  💡 Background Remover를 설치하려면: pip install rembg")
             
             print(f"\n{'='*60}")
             print(f"✔ 파이프라인 완료!")
@@ -500,15 +806,21 @@ class FashionPipeline:
                 print(f"  - 상의: {top_attrs['category']} ({top_attrs['color']})")
             if bottom_attrs:
                 print(f"  - 하의: {bottom_attrs['category']} ({bottom_attrs['color']})")
+            if outer_attrs:
+                print(f"  - 아우터: {outer_attrs['category']} ({outer_attrs['color']})")
+            if dress_attrs:
+                print(f"  - 드레스: {dress_attrs['category']} ({dress_attrs['color']})")
             print(f"{'='*60}\n")
             
             return {
                 'success': True,
                 'item_id': item_id,
                 'chroma_id': chroma_id,
-                'separation': separation,
+                'detection_result': detection_result,
                 'top_attributes': top_attrs,
                 'bottom_attributes': bottom_attrs,
+                'outer_attributes': outer_attrs,
+                'dress_attributes': dress_attrs,
                 'similar_items': similar_items
             }
             
