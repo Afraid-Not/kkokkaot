@@ -17,6 +17,7 @@ import MyInfoScreen from './components/figma/MyInfoScreen';
 import SettingsScreen from './components/figma/SettingsScreen';
 import NotificationsScreen from './components/figma/NotificationsScreen';
 import SupportScreen from './components/figma/SupportScreen';
+import LLMChatScreen from './components/figma/LLMChatScreen';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export type MainScreen =
@@ -32,7 +33,8 @@ export type MainScreen =
   | 'myinfo'
   | 'settings'
   | 'notifications'
-  | 'support';
+  | 'support'
+  | 'llm-chat';
 
 type Screen =
   | 'splash'
@@ -58,11 +60,7 @@ export default function App() {
 
   const handleLoginSuccess = async (name: string) => {
     setUserName(name);
-    // 최소 프로필을 저장 (나중에 서버 응답으로 교체 가능)
-    await AsyncStorage.setItem(
-      '@kko/user',
-      JSON.stringify({ id: 'local-user', name, email: `${name}@local` })
-    );
+    // 서버에서 받은 실제 사용자 정보를 사용 (LoginScreen에서 이미 저장됨)
     setScreen('main');
     setMainScreen('home');
   };
@@ -81,6 +79,7 @@ export default function App() {
   const handleSignupSuccess = async (data: { name: string }) => {
     console.log('🎉 App.tsx - handleSignupSuccess 호출됨:', data);
     setUserName(data.name);
+    // 회원가입 시에는 임시 ID 사용 (실제 서버 응답이 없으므로)
     await AsyncStorage.setItem(
       '@kko/user',
       JSON.stringify({ id: 'local-user', name: data.name, email: `${data.name}@local` })
@@ -151,6 +150,8 @@ export default function App() {
           return <NotificationsScreen onBack={() => navigate('home')} />;
         case 'support':
           return <SupportScreen onBack={() => navigate('home')} />;
+        case 'llm-chat':
+          return <LLMChatScreen onBack={() => navigate('home')} onNavigate={navigate} />;
         default:
           return <HomeScreen userName={userName} onNavigate={navigate} onLogout={handleLogout} />;
       }

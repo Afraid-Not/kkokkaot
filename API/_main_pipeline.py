@@ -242,6 +242,21 @@ class FashionPipeline:
         print(f"    - has_outer: {has_outer}")
         print(f"    - has_dress: {has_dress}")
         
+        # ✅ 의류 감지 검증: 아무것도 감지되지 않았으면 오류 발생
+        if not any([has_top, has_bottom, has_outer, has_dress]):
+            print(f"  ❌ 의류 감지 실패: 신뢰도 0.3 이상인 의류가 감지되지 않았습니다.")
+            
+            # 더 상세한 오류 메시지 생성
+            total_detections = len(results[0].boxes) if results[0].boxes is not None else 0
+            error_details = f"총 {total_detections}개의 객체가 감지되었지만, 신뢰도 0.3 이상인 의류(top, bottom, outer, dress)가 없습니다."
+            
+            if total_detections == 0:
+                error_details = "이미지에서 의류를 전혀 감지할 수 없습니다. 의류가 명확하게 보이는 사진인지 확인해주세요."
+            elif total_detections > 0:
+                error_details += f" 감지된 객체들의 신뢰도가 너무 낮아 의류로 인식되지 않았습니다."
+            
+            raise ValueError(error_details)
+        
         return {
             'original': image_rgb,
             'detected_items': final_items,
@@ -475,10 +490,10 @@ class FashionPipeline:
                         bottom_attrs['fit_confidence']
                     ))
                 
-                # 아우터 속성 (top_attributes 테이블에 저장)
+                # 아우터 속성 (outer_attributes 테이블에 저장)
                 if outer_attrs and detection_result['has_outer']:
                     cur.execute("""
-                        INSERT INTO top_attributes (
+                        INSERT INTO outer_attributes (
                             item_id, category, color, fit, materials,
                             category_confidence, color_confidence, fit_confidence
                         ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
@@ -493,10 +508,10 @@ class FashionPipeline:
                         outer_attrs['fit_confidence']
                     ))
                 
-                # 드레스 속성 (top_attributes 테이블에 저장)
+                # 드레스 속성 (dress_attributes 테이블에 저장)
                 if dress_attrs and detection_result['has_dress']:
                     cur.execute("""
-                        INSERT INTO top_attributes (
+                        INSERT INTO dress_attributes (
                             item_id, category, color, fit, materials,
                             category_confidence, color_confidence, fit_confidence
                         ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
@@ -714,10 +729,10 @@ class FashionPipeline:
             # 8. 유사 아이템 검색
             similar_items = self.search_similar(embedding, n_results=5)
             
-            # 9. ✅ 분리된 이미지 저장 (폴더 구조)
+            # 9. ✅ 분리된 이미지 저장 (사용자별 폴더 구조)
             if save_separated_images:
-                # 📁 카테고리별 폴더 구조 생성
-                base_dir = Path("./processed_images")
+                # 📁 사용자별 + 카테고리별 폴더 구조 생성
+                base_dir = Path("./processed_images") / f"user_{user_id}"
                 folders = {
                     'full': base_dir / 'full',
                     'top': base_dir / 'top',

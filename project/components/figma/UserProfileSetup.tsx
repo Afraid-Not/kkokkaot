@@ -36,64 +36,124 @@ const SKIN_TONES = [
 
 const STYLE_PREFERENCES = [
   {
-    name: '캐주얼',
-    description: '편안하고 자연스러운 일상 스타일',
-    image:
-      'https://images.unsplash.com/photo-1599016461690-8a24d561319e?auto=format&fit=crop&w=800&q=60',
+    name: '기타',
+    description: '다른 카테고리에 속하지 않는 독특한 스타일',
+    image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/etc.jpg',
   },
   {
-    name: '미니멀',
-    description: '깔끔하고 심플한 세련된 스타일',
-    image:
-      'https://images.unsplash.com/photo-1544441893-675973e31985?auto=format&fit=crop&w=800&q=60',
+    name: '레트로',
+    description: '과거 시대의 감성과 스타일을 재해석한 룩',
+    image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/retro.jpg',
   },
   {
-    name: '클래식',
-    description: '우아하고 고급스러운 정통 스타일',
-    image:
-      'https://images.unsplash.com/photo-1636281774812-48e8ef62f768?auto=format&fit=crop&w=800&q=60',
-  },
-  {
-    name: '러블리',
+    name: '로맨틱',
     description: '사랑스럽고 여성스러운 로맨틱 스타일',
-    image:
-      'https://images.unsplash.com/photo-1745750003448-ba149f954428?auto=format&fit=crop&w=800&q=60',
+    image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/romantic.jpg',
   },
   {
-    name: '스트릿',
+    name: '리조트',
+    description: '휴양지에서 즐기는 여유롭고 세련된 스타일',
+    image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/resort.jpg',
+  },
+  {
+    name: '매니시',
+    description: '남성적인 요소를 여성스럽게 소화한 스타일',
+    image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/manish.jpg',
+  },
+  {
+    name: '모던',
+    description: '현대적이고 세련된 미니멀 스타일',
+    image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/modern.jpg',
+  },
+  {
+    name: '밀리터리',
+    description: '군복에서 영감을 받은 강인하고 실용적인 스타일',
+    image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/military.jpg',
+  },
+  {
+    name: '섹시',
+    description: '매력적이고 관능적인 스타일',
+    image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/sexy.jpg',
+  },
+  {
+    name: '소피스트케이티드',
+    description: '세련되고 지적인 고급스러운 스타일',
+    image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/sophisticated.jpg',
+  },
+  {
+    name: '스트리트',
     description: '개성있고 트렌디한 도시 스타일',
-    image:
-      'https://images.unsplash.com/photo-1624914990379-f2082e413b4c?auto=format&fit=crop&w=800&q=60',
+    image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/street.jpg',
   },
   {
     name: '스포티',
     description: '활동적이고 편안한 스포츠 룩',
-    image:
-      'https://images.unsplash.com/photo-1628271491650-c2346e8aa7c5?auto=format&fit=crop&w=800&q=60',
+    image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/sporty.jpg',
   },
   {
-    name: '비즈니스',
-    description: '전문적이고 세련된 오피스 스타일',
-    image:
-      'https://images.unsplash.com/photo-1593032470861-4509830938cb?auto=format&fit=crop&w=800&q=60',
+    name: '아방가르드',
+    description: '실험적이고 혁신적인 예술적 스타일',
+    image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/avangard.jpg',
   },
   {
-    name: '보헤미안',
-    description: '자유롭고 예술적인 보헤미안 스타일',
-    image:
-      'https://images.unsplash.com/photo-1682615826547-c33c4511df2e?auto=format&fit=crop&w=800&q=60',
+    name: '오리엔탈',
+    description: '동양의 전통과 현대가 만나는 스타일',
+    image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/oriental.jpg',
   },
   {
-    name: '프렙피',
+    name: '웨스턴',
+    description: '미국 서부의 카우보이 스타일',
+    image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/western.jpg',
+  },
+  {
+    name: '젠더리스',
+    description: '성별을 초월한 중성적이고 자유로운 스타일',
+    image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/genderless.jpg',
+  },
+  {
+    name: '컨트리',
+    description: '시골의 자연스럽고 편안한 스타일',
+    image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/country.jpg',
+  },
+  {
+    name: '클래식',
+    description: '우아하고 고급스러운 정통 스타일',
+    image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/classic.jpg',
+  },
+  {
+    name: '키치',
+    description: '유머러스하고 장식적인 팝 아트 스타일',
+    image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/kitsch.jpg',
+  },
+  {
+    name: '톰보이',
+    description: '남성적인 요소를 자연스럽게 소화한 스타일',
+    image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/tomboy.jpg',
+  },
+  {
+    name: '펑크',
+    description: '반항적이고 독립적인 록 스타일',
+    image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/funk.jpg',
+  },
+  {
+    name: '페미닌',
+    description: '여성스럽고 우아한 스타일',
+    image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/feminin.jpg',
+  },
+  {
+    name: '프레피',
     description: '단정하고 깔끔한 아이비리그 스타일',
-    image:
-      'https://images.unsplash.com/photo-1601428213629-8133fad8bd68?auto=format&fit=crop&w=800&q=60',
+    image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/preppy.jpg',
   },
   {
-    name: '빈티지',
-    description: '클래식하고 복고적인 레트로 스타일',
-    image:
-      'https://images.unsplash.com/photo-1555180739-0cb3b1d85138?auto=format&fit=crop&w=800&q=60',
+    name: '히피',
+    description: '자유롭고 예술적인 보헤미안 스타일',
+    image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/hippy.jpg',
+  },
+  {
+    name: '힙합',
+    description: '힙합 문화에서 영감을 받은 스트리트 스타일',
+    image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/hiphop.jpg',
   },
 ];
 
@@ -305,7 +365,7 @@ export default function UserProfileSetup({ onComplete }: UserProfileSetupProps) 
                     </Text>
                   </View>
 
-                  <View style={{ gap: 10 }}>
+                  <View style={styles.grid2}>
                     {STYLE_PREFERENCES.map((s) => (
                       <Pressable
                         key={s.name}
@@ -315,25 +375,13 @@ export default function UserProfileSetup({ onComplete }: UserProfileSetupProps) 
                           form.stylePreferences.includes(s.name) && styles.styleCardActive,
                         ]}
                       >
-                        <View style={styles.styleThumb}>
-                          <Image
-                            source={{ uri: s.image }}
-                            style={StyleSheet.absoluteFillObject}
-                            resizeMode="cover"
-                          />
-                        </View>
-                        <View style={{ flex: 1 }}>
-                          <Text style={styles.styleName}>{s.name}</Text>
-                          <Text style={styles.styleDesc}>{s.description}</Text>
-                        </View>
-                        <View
-                          style={[
-                            styles.circleSmall,
-                            form.stylePreferences.includes(s.name)
-                              ? styles.circleOn
-                              : styles.circleOff,
-                          ]}
+                        <Image
+                          source={{ uri: s.image }}
+                          style={styles.styleThumb}
+                          resizeMode="cover"
                         />
+                        <View style={styles.styleOverlay} />
+                        <Text style={styles.styleName}>{s.name}</Text>
                       </Pressable>
                     ))}
                   </View>
@@ -503,23 +551,24 @@ const styles = StyleSheet.create({
   skinName: { fontSize: 13, color: '#111827' },
 
   styleCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    padding: 12,
+    width: '48.5%',
+    aspectRatio: 1,
+    borderRadius: 8,
+    overflow: 'hidden',
+    justifyContent: 'flex-end',
+    padding: 8,
     borderWidth: 1,
     borderColor: '#E5E7EB',
     backgroundColor: '#FFFFFF',
   },
   styleCardActive: { borderColor: '#111111', backgroundColor: '#F9FAFB' },
   styleThumb: {
-    width: 64,
-    height: 84,
-    backgroundColor: '#F3F4F6',
-    overflow: 'hidden',
+    ...StyleSheet.absoluteFillObject,
   },
-  styleName: { fontSize: 14, color: '#111827', fontWeight: '600' },
+  styleName: { color: '#FFF', fontWeight: 'bold', fontSize: 14, textShadowColor: 'rgba(0,0,0,0.5)', textShadowOffset: {width: 0, height: 1}, textShadowRadius: 2 },
+  styleOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.3)' },
   styleDesc: { fontSize: 12, color: '#6B7280', lineHeight: 18 },
+  grid2: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: 12 },
 
   tipBox: {
     borderLeftWidth: 2,
