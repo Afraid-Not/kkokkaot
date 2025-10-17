@@ -38,6 +38,11 @@ processed_images/
 API/default_items/
 temp/
 cache/
+converted_data/all_images/
+converted_data/cnn/
+converted_data/yolo/
+converted_data/sam/
+converted_data/
 
 # Project-specific (프로젝트 파일은 팀원들과 공유 필요하면 주석 처리)
 # project/
