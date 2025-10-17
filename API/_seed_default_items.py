@@ -71,7 +71,7 @@ def seed_default_items():
     print("🌱 기본 아이템 데이터 삽입 시작")
     print("="*60 + "\n")
     
-    # 파이프라인 초기화 (4개 카테고리 지원, Pose 제외)
+    # 파이프라인 초기화 (4개 카테고리 지원, Pose 제외, Background Remover 포함)
     pipeline = FashionPipeline(
         yolo_pose_path=None,  # Pose 모델 불필요
         yolo_detection_path="./API/pre_trained_weights/yolo_best.pt",  # 4개 카테고리 감지만 사용

@@ -217,6 +217,28 @@ export default function DailyOutfitRecommendation({
         if (loadedItems.length > 0 && baseItemId === null) {
             setBaseItemId(loadedItems[0].id);
         }
+        
+        // ✅ baseItemId가 변경될 때 selectedPart를 아이템의 실제 카테고리로 설정
+        if (baseItemId && loadedItems.length > 0) {
+            const currentItem = loadedItems.find(item => item.id === baseItemId);
+            if (currentItem) {
+                let newSelectedPart = '';
+                if (currentItem.has_dress) {
+                    newSelectedPart = 'dress';
+                } else if (currentItem.has_outer) {
+                    newSelectedPart = 'outer';
+                } else if (currentItem.has_top) {
+                    newSelectedPart = 'top';
+                } else if (currentItem.has_bottom) {
+                    newSelectedPart = 'bottom';
+                }
+                
+                if (newSelectedPart && newSelectedPart !== selectedPart) {
+                    console.log(`🔄 아이템 ${baseItemId} 선택으로 인한 추천 방식 변경: ${selectedPart} → ${newSelectedPart}`);
+                    setSelectedPart(newSelectedPart);
+                }
+            }
+        }
       } else {
         setWardrobeItems([]);
       }
@@ -227,7 +249,7 @@ export default function DailyOutfitRecommendation({
   }, [baseItemId]); 
 
   
-  // ✨ AI 추천 요청 (수정: 4개 카테고리별 추천 지원)
+  // ✨ AI 추천 요청 (수정: 아이템의 실제 카테고리 기반 추천)
   const fetchRecommendation = async () => {
     if (!baseItem) {
       Alert.alert('알림', '추천 기준이 될 아이템을 먼저 선택해주세요.');
@@ -237,21 +259,40 @@ export default function DailyOutfitRecommendation({
     setRecommending(true);
 
     try {
-      // ✅ selectedPart에 따라 다른 엔드포인트 호출
+      // ✅ 아이템의 실제 카테고리 확인 (우선순위: 드레스 > 아우터 > 상의 > 하의)
+      let actualCategory = '';
+      if (baseItem.has_dress) {
+        actualCategory = 'dress';
+      } else if (baseItem.has_outer) {
+        actualCategory = 'outer';
+      } else if (baseItem.has_top) {
+        actualCategory = 'top';
+      } else if (baseItem.has_bottom) {
+        actualCategory = 'bottom';
+      } else {
+        Alert.alert('오류', '선택한 아이템의 카테고리를 확인할 수 없습니다.');
+        setRecommending(false);
+        return;
+      }
+      
+      console.log(`🎯 아이템 ${baseItem.id}의 실제 카테고리: ${actualCategory}`);
+      console.log(`🎯 사용자가 선택한 추천 방식: ${selectedPart}`);
+      
+      // ✅ 실제 카테고리에 따라 다른 엔드포인트 호출
       let url = '';
       
-      if (selectedPart === 'top') {
+      if (actualCategory === 'top') {
         // 상의 → 하의 or 아우터 추천
         url = `${API_BASE_URL}/api/recommendations/match-bottom-or-outer/${baseItem.id}?n_results=3&user_id=${userId}`;
-      } else if (selectedPart === 'bottom') {
+      } else if (actualCategory === 'bottom') {
         // 하의 → 상의 or 아우터+상의 추천
         url = `${API_BASE_URL}/api/recommendations/match-top-or-outer-top/${baseItem.id}?n_results=3&user_id=${userId}`;
-      } else if (selectedPart === 'outer') {
+      } else if (actualCategory === 'outer') {
         // 아우터 → 상의 or 하의 or 상의+하의 추천
         url = `${API_BASE_URL}/api/recommendations/match-top-or-bottom-or-combo/${baseItem.id}?n_results=3&user_id=${userId}`;
-      } else if (selectedPart === 'dress') {
+      } else if (actualCategory === 'dress') {
         // 드레스 → 하의 or 아우터 추천
-        url = `${API_BASE_URL}/api/recommendations/match-bottom-or-outer/${baseItem.id}?n_results=3&user_id=${userId}`;
+        url = `${API_BASE_URL}/api/recommendations/match-bottom-or-outer-for-dress/${baseItem.id}?n_results=3&user_id=${userId}`;
       }
       
       console.log(`\n✨ 추천 요청 URL: ${url}`);
@@ -299,10 +340,10 @@ export default function DailyOutfitRecommendation({
           };
         });
         
-        // 기본 아이템 추천도 함께 추가
+        // 기본 아이템 추천도 함께 추가 (중복 제거)
         const combinedRecs = [...recs];
         
-        // 기본 아이템 추천이 있으면 추가
+        // 기본 아이템 추천이 있으면 추가 (중복 ID 제거)
         if (defaultRecommendations.length > 0) {
           const defaultRecs = defaultRecommendations.map((item, index) => ({
             id: item.id,
@@ -314,7 +355,11 @@ export default function DailyOutfitRecommendation({
             is_default: true,
           }));
           
-          combinedRecs.push(...defaultRecs);
+          // 중복 ID 제거: 이미 있는 ID는 제외하고 추가
+          const existingIds = new Set(combinedRecs.map(r => r.id));
+          const uniqueDefaultRecs = defaultRecs.filter(r => !existingIds.has(r.id));
+          
+          combinedRecs.push(...uniqueDefaultRecs);
         }
         
         setRecommendations(combinedRecs);
@@ -677,7 +722,27 @@ export default function DailyOutfitRecommendation({
                         {wardrobeItems.map((item, index) => (
                             <Pressable 
                                 key={`${item.id}-${index}`} 
-                                onPress={() => { setBaseItemId(item.id); setRecommendations([]); }} 
+                                onPress={() => { 
+                                    setBaseItemId(item.id); 
+                                    setRecommendations([]);
+                                    
+                                    // ✅ 아이템 선택 시 자동으로 추천 방식 설정
+                                    let newSelectedPart = '';
+                                    if (item.has_dress) {
+                                        newSelectedPart = 'dress';
+                                    } else if (item.has_outer) {
+                                        newSelectedPart = 'outer';
+                                    } else if (item.has_top) {
+                                        newSelectedPart = 'top';
+                                    } else if (item.has_bottom) {
+                                        newSelectedPart = 'bottom';
+                                    }
+                                    
+                                    if (newSelectedPart) {
+                                        console.log(`🎯 아이템 ${item.id} 선택으로 추천 방식 설정: ${newSelectedPart}`);
+                                        setSelectedPart(newSelectedPart);
+                                    }
+                                }} 
                                 style={[styles.baseItemCard, item.id === baseItemId && styles.baseItemCardActive]}
                                 disabled={loading || recommending}
                             >
@@ -697,10 +762,11 @@ export default function DailyOutfitRecommendation({
           <View>
             <Text style={styles.sectionTitle}>추천 방식 선택</Text>
             <Text style={styles.sectionSubtitle}>
-              {selectedPart === 'top' ? '이 상의와 어울리는 하의 or 아우터 추천' :
-              selectedPart === 'bottom' ? '이 하의와 어울리는 상의 or 아우터+상의 추천' :
-              selectedPart === 'outer' ? '이 아우터와 어울리는 상의 or 하의 or 상의+하의 추천' :
-              '이 드레스와 어울리는 하의 or 아우터 추천'}
+              {baseItem.has_dress ? '이 드레스와 어울리는 하의 or 아우터 추천' :
+              baseItem.has_outer ? '이 아우터와 어울리는 상의 or 하의 or 상의+하의 추천' :
+              baseItem.has_top ? '이 상의와 어울리는 하의 or 아우터 추천' :
+              baseItem.has_bottom ? '이 하의와 어울리는 상의 or 아우터+상의 추천' :
+              '추천할 수 있는 아이템이 없습니다'}
             </Text>
             
             <View style={styles.partSelector}>
@@ -857,7 +923,7 @@ export default function DailyOutfitRecommendation({
           ) : (
             <View style={{ gap: 16, marginTop: 16 }}>
               {recommendations.map((rec, index) => (
-                <View key={rec.id} style={styles.cardRow}>
+                <View key={`${rec.id}-${index}-${rec.is_default ? 'default' : 'user'}`} style={styles.cardRow}>
                   <View style={styles.thumbBig}>
                     <Image 
                       source={{ uri: rec.image }} 

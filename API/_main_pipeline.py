@@ -13,6 +13,14 @@ from psycopg2.extras import Json
 import json
 from typing import Dict, Tuple, Optional
 
+# Background Remover 관련 import
+try:
+    from rembg import remove, new_session
+    REMBG_AVAILABLE = True
+except ImportError:
+    print("⚠️ rembg가 설치되지 않았습니다. Background Remover 기능을 사용할 수 없습니다.")
+    REMBG_AVAILABLE = False
+
 # GPU 설정
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"사용 디바이스: {DEVICE}")
@@ -25,9 +33,9 @@ class FashionPipeline:
                 yolo_pose_path: str = "./API/pre_trained_weights/yolo11n-pose.pt",
                 yolo_detection_path: str = "./API/pre_trained_weights/yolo_best.pt",
                 # top_model_path: str = "./API/pre_trained_weights/fashion_top_model.pth",
-                top_model_path: str = "./API/pre_trained_weights/fashion_attr_resnet50_epochs200_best.pth",
+                top_model_path: str = "./API/pre_trained_weights/fashion_top_model_1017.pth",
                 # bottom_model_path: str = "./API/pre_trained_weights/fashion_bottom_model.pth",
-                bottom_model_path: str = "./API/pre_trained_weights/fashion_attr_resnet50_epochs200_best.pth",
+                bottom_model_path: str = "./API/pre_trained_weights/fashion_bottom_model_1017.pth",
                 chroma_path: str = "./chroma_db",
                 db_config: dict = None):
         """초기화"""
@@ -45,6 +53,23 @@ class FashionPipeline:
         # 1-1. YOLO Detection 모델 (상의/하의/아우터/드레스 분류)
         print("1-1. YOLO Detection 로드...")
         self.yolo_detection_model = YOLO(yolo_detection_path)
+        
+        # 1-2. Background Remover (누끼따기)
+        if REMBG_AVAILABLE:
+            print("1-2. Background Remover 초기화...")
+            try:
+                # Background Remover 세션 초기화 (u2net 모델 사용)
+                self.rembg_session = new_session('u2net')
+                self.rembg_available = True
+                print("✅ Background Remover 초기화 완료!")
+            except Exception as e:
+                print(f"⚠️ Background Remover 초기화 실패: {e}")
+                self.rembg_session = None
+                self.rembg_available = False
+        else:
+            print("1-2. Background Remover 건너뛰기...")
+            self.rembg_session = None
+            self.rembg_available = False
         
         # 2. 상의 모델 로드
         print("2. 상의 모델 로드...")
@@ -545,6 +570,37 @@ class FashionPipeline:
         print(f"  - 검색 완료: {len(results['ids'][0])}개")
         return results
     
+    def remove_background_with_rembg(self, image: np.ndarray) -> np.ndarray:
+        """
+        Background Remover를 사용하여 배경 제거
+        
+        Args:
+            image: 입력 이미지 (RGB)
+        
+        Returns:
+            transparent_image: 투명 배경 이미지 (RGBA)
+        """
+        if not self.rembg_available:
+            print("⚠️ Background Remover가 사용 불가능합니다.")
+            return None
+        
+        try:
+            # PIL Image로 변환
+            pil_image = Image.fromarray(image)
+            
+            # Background Remover로 배경 제거
+            transparent_image = remove(pil_image, session=self.rembg_session)
+            
+            # numpy array로 변환
+            transparent_array = np.array(transparent_image)
+            
+            return transparent_array
+            
+        except Exception as e:
+            print(f"❌ Background Remover 처리 실패: {e}")
+            return None
+    
+    
     
     def process_image(self, image_path: str, user_id: int, 
                     save_separated_images: bool = False) -> Dict:
@@ -698,6 +754,49 @@ class FashionPipeline:
                     dress_path = folders['dress'] / f"item_{item_id}_dress.jpg"
                     Image.fromarray(detection_result['detected_items']['dress']['cropped_image']).save(dress_path)
                     print(f"  ✅ 드레스 저장: {dress_path}")
+                
+                # 🎭 Background Remover로 누끼따기 이미지 저장 (마네킹 합성용)
+                if self.rembg_available:
+                    sam_folders = {
+                        'top_segmented': base_dir / 'top_segmented',
+                        'bottom_segmented': base_dir / 'bottom_segmented',
+                        'outer_segmented': base_dir / 'outer_segmented',
+                        'dress_segmented': base_dir / 'dress_segmented'
+                    }
+                    
+                    for folder in sam_folders.values():
+                        folder.mkdir(parents=True, exist_ok=True)
+                    
+                    # 각 카테고리별로 Background Remover 수행
+                    categories = [
+                        ('top', 'top_segmented', detection_result['has_top']),
+                        ('bottom', 'bottom_segmented', detection_result['has_bottom']),
+                        ('outer', 'outer_segmented', detection_result['has_outer']),
+                        ('dress', 'dress_segmented', detection_result['has_dress'])
+                    ]
+                    
+                    for category, rembg_folder, has_item in categories:
+                        if has_item:
+                            try:
+                                # bbox 크롭 이미지 가져오기
+                                cropped_image = detection_result['detected_items'][category]['cropped_image']
+                                
+                                # Background Remover로 배경 제거
+                                transparent_image = self.remove_background_with_rembg(cropped_image)
+                                
+                                if transparent_image is not None:
+                                    # PNG로 저장
+                                    rembg_path = sam_folders[rembg_folder] / f"item_{item_id}_{category}_segmented.png"
+                                    Image.fromarray(transparent_image, 'RGBA').save(rembg_path)
+                                    print(f"  🎭 {category} 누끼따기 저장: {rembg_path}")
+                                else:
+                                    print(f"  ⚠️ {category} Background Remover 실패")
+                                    
+                            except Exception as e:
+                                print(f"  ❌ {category} Background Remover 처리 오류: {e}")
+                else:
+                    print("  ⚠️ Background Remover가 사용 불가능하여 누끼따기 건너뛰기")
+                    print("  💡 Background Remover를 설치하려면: pip install rembg")
             
             print(f"\n{'='*60}")
             print(f"✔ 파이프라인 완료!")

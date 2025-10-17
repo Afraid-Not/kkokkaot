@@ -1354,7 +1354,17 @@ def get_matching_bottom_or_outer(
                     detail="선택한 아이템이 상의가 아닙니다."
                 )
         
-        # 2. 하의 또는 아우터 아이템들 검색
+        # 2. 사용자의 전체 옷장 아이템 개수 확인
+        with pipeline.db_conn.cursor() as cur:
+            cur.execute("""
+                SELECT COUNT(*) FROM wardrobe_items 
+                WHERE user_id = %s AND is_default = FALSE
+            """, (base_user_id,))
+            user_item_count = cur.fetchone()[0]
+        
+        print(f"  📊 사용자 옷장 아이템 개수: {user_item_count}개")
+        
+        # 3. 하의 또는 아우터 아이템들 검색
         with pipeline.db_conn.cursor() as cur:
             cur.execute("""
                 SELECT 
@@ -1377,16 +1387,45 @@ def get_matching_bottom_or_outer(
             
             candidate_items = cur.fetchall()
         
-        if not candidate_items:
+        # 4. 기본 아이템들도 함께 가져오기 (옷장이 20개 미만일 때)
+        default_items = []
+        if user_item_count < 20:
+            print(f"  🎯 옷장이 {user_item_count}개로 부족하여 기본 아이템도 추가합니다.")
+            with pipeline.db_conn.cursor() as cur:
+                cur.execute("""
+                    SELECT 
+                        w.item_id,
+                        w.original_image_path,
+                        w.user_id,
+                        w.has_bottom,
+                        w.has_outer,
+                        b.category as bottom_category,
+                        b.color as bottom_color,
+                        o.category as outer_category,
+                        o.color as outer_color
+                    FROM wardrobe_items w
+                    LEFT JOIN bottom_attributes b ON w.item_id = b.item_id AND w.has_bottom = TRUE
+                    LEFT JOIN top_attributes o ON w.item_id = o.item_id AND w.has_outer = TRUE
+                    WHERE w.is_default = TRUE
+                    AND (w.has_bottom = TRUE OR w.has_outer = TRUE)
+                    ORDER BY w.item_id
+                    LIMIT 5
+                """)
+                default_items = cur.fetchall()
+        
+        # 5. 모든 후보 아이템들 결합
+        all_candidates = list(candidate_items) + list(default_items)
+        
+        if not all_candidates:
             return {
                 "success": True,
                 "recommendations": [],
                 "message": "추천할 하의 또는 아우터가 없습니다."
             }
         
-        # 3. AI 유사도 기반 추천 (간단한 구현)
+        # 6. AI 유사도 기반 추천 (간단한 구현)
         recommendations = []
-        for item in candidate_items[:n_results]:
+        for item in all_candidates[:n_results]:
             item_id, image_path, user_id, has_bottom, has_outer, bottom_cat, bottom_color, outer_cat, outer_color = item
             
             print(f"🔍 추천 아이템 {item_id}: image_path = {image_path}")
@@ -1410,13 +1449,17 @@ def get_matching_bottom_or_outer(
             else:
                 filename = f"item_{item_id}.jpg"
             
+            # 기본 아이템인지 확인
+            is_default = item in default_items
+            
             recommendations.append({
                 "id": item_id,
                 "image_path": filename,  # 기존 API와 동일한 필드명
                 "distance": 1.0 - score,  # 프론트엔드에서 사용하는 distance 필드 추가
                 "score": round(score, 2),
                 "category": "하의" if has_bottom else "아우터",
-                "name": f"{bottom_color or outer_color or ''} {bottom_cat or outer_cat or ''}".strip()
+                "name": f"{bottom_color or outer_color or ''} {bottom_cat or outer_cat or ''}".strip(),
+                "is_default": is_default
             })
         
         print(f"✅ 추천 완료: {len(recommendations)}개")
@@ -1487,7 +1530,17 @@ def get_matching_top_or_outer_top(
                     detail="선택한 아이템이 하의가 아닙니다."
                 )
         
-        # 2. 상의 또는 아우터 아이템들 검색
+        # 2. 사용자의 전체 옷장 아이템 개수 확인
+        with pipeline.db_conn.cursor() as cur:
+            cur.execute("""
+                SELECT COUNT(*) FROM wardrobe_items 
+                WHERE user_id = %s AND is_default = FALSE
+            """, (base_user_id,))
+            user_item_count = cur.fetchone()[0]
+        
+        print(f"  📊 사용자 옷장 아이템 개수: {user_item_count}개")
+        
+        # 3. 상의 또는 아우터 아이템들 검색
         with pipeline.db_conn.cursor() as cur:
             cur.execute("""
                 SELECT 
@@ -1510,16 +1563,45 @@ def get_matching_top_or_outer_top(
             
             candidate_items = cur.fetchall()
         
-        if not candidate_items:
+        # 4. 기본 아이템들도 함께 가져오기 (옷장이 20개 미만일 때)
+        default_items = []
+        if user_item_count < 20:
+            print(f"  🎯 옷장이 {user_item_count}개로 부족하여 기본 아이템도 추가합니다.")
+            with pipeline.db_conn.cursor() as cur:
+                cur.execute("""
+                    SELECT 
+                        w.item_id,
+                        w.original_image_path,
+                        w.user_id,
+                        w.has_top,
+                        w.has_outer,
+                        t.category as top_category,
+                        t.color as top_color,
+                        o.category as outer_category,
+                        o.color as outer_color
+                    FROM wardrobe_items w
+                    LEFT JOIN top_attributes t ON w.item_id = t.item_id AND w.has_top = TRUE
+                    LEFT JOIN top_attributes o ON w.item_id = o.item_id AND w.has_outer = TRUE
+                    WHERE w.is_default = TRUE
+                    AND (w.has_top = TRUE OR w.has_outer = TRUE)
+                    ORDER BY w.item_id
+                    LIMIT 5
+                """)
+                default_items = cur.fetchall()
+        
+        # 5. 모든 후보 아이템들 결합
+        all_candidates = list(candidate_items) + list(default_items)
+        
+        if not all_candidates:
             return {
                 "success": True,
                 "recommendations": [],
                 "message": "추천할 상의 또는 아우터가 없습니다."
             }
         
-        # 3. AI 유사도 기반 추천
+        # 6. AI 유사도 기반 추천
         recommendations = []
-        for item in candidate_items[:n_results]:
+        for item in all_candidates[:n_results]:
             item_id, image_path, user_id, has_top, has_outer, top_cat, top_color, outer_cat, outer_color = item
             
             print(f"🔍 추천 아이템 {item_id}: image_path = {image_path}")
@@ -1543,13 +1625,17 @@ def get_matching_top_or_outer_top(
             else:
                 filename = f"item_{item_id}.jpg"
             
+            # 기본 아이템인지 확인
+            is_default = item in default_items
+            
             recommendations.append({
                 "id": item_id,
                 "image_path": filename,  # 기존 API와 동일한 필드명
                 "distance": 1.0 - score,  # 프론트엔드에서 사용하는 distance 필드 추가
                 "score": round(score, 2),
                 "category": "상의" if has_top else "아우터",
-                "name": f"{top_color or outer_color or ''} {top_cat or outer_cat or ''}".strip()
+                "name": f"{top_color or outer_color or ''} {top_cat or outer_cat or ''}".strip(),
+                "is_default": is_default
             })
         
         print(f"✅ 추천 완료: {len(recommendations)}개")
@@ -1620,7 +1706,17 @@ def get_matching_top_or_bottom_or_combo(
                     detail="선택한 아이템이 아우터가 아닙니다."
                 )
         
-        # 2. 상의, 하의, 또는 상의+하의 아이템들 검색
+        # 2. 사용자의 전체 옷장 아이템 개수 확인
+        with pipeline.db_conn.cursor() as cur:
+            cur.execute("""
+                SELECT COUNT(*) FROM wardrobe_items 
+                WHERE user_id = %s AND is_default = FALSE
+            """, (base_user_id,))
+            user_item_count = cur.fetchone()[0]
+        
+        print(f"  📊 사용자 옷장 아이템 개수: {user_item_count}개")
+        
+        # 3. 상의, 하의, 또는 상의+하의 아이템들 검색
         with pipeline.db_conn.cursor() as cur:
             cur.execute("""
                 SELECT 
@@ -1643,16 +1739,45 @@ def get_matching_top_or_bottom_or_combo(
             
             candidate_items = cur.fetchall()
         
-        if not candidate_items:
+        # 4. 기본 아이템들도 함께 가져오기 (옷장이 20개 미만일 때)
+        default_items = []
+        if user_item_count < 20:
+            print(f"  🎯 옷장이 {user_item_count}개로 부족하여 기본 아이템도 추가합니다.")
+            with pipeline.db_conn.cursor() as cur:
+                cur.execute("""
+                    SELECT 
+                        w.item_id,
+                        w.original_image_path,
+                        w.user_id,
+                        w.has_top,
+                        w.has_bottom,
+                        t.category as top_category,
+                        t.color as top_color,
+                        b.category as bottom_category,
+                        b.color as bottom_color
+                    FROM wardrobe_items w
+                    LEFT JOIN top_attributes t ON w.item_id = t.item_id AND w.has_top = TRUE
+                    LEFT JOIN bottom_attributes b ON w.item_id = b.item_id AND w.has_bottom = TRUE
+                    WHERE w.is_default = TRUE
+                    AND (w.has_top = TRUE OR w.has_bottom = TRUE)
+                    ORDER BY w.item_id
+                    LIMIT 5
+                """)
+                default_items = cur.fetchall()
+        
+        # 5. 모든 후보 아이템들 결합
+        all_candidates = list(candidate_items) + list(default_items)
+        
+        if not all_candidates:
             return {
                 "success": True,
                 "recommendations": [],
                 "message": "추천할 상의, 하의, 또는 상의+하의가 없습니다."
             }
         
-        # 3. AI 유사도 기반 추천
+        # 6. AI 유사도 기반 추천
         recommendations = []
-        for item in candidate_items[:n_results]:
+        for item in all_candidates[:n_results]:
             item_id, image_path, user_id, has_top, has_bottom, top_cat, top_color, bottom_cat, bottom_color = item
             
             print(f"🔍 추천 아이템 {item_id}: image_path = {image_path}")
@@ -1687,13 +1812,175 @@ def get_matching_top_or_bottom_or_combo(
             else:
                 filename = f"item_{item_id}.jpg"
             
+            # 기본 아이템인지 확인
+            is_default = item in default_items
+            
             recommendations.append({
                 "id": item_id,
                 "image_path": filename,  # 기존 API와 동일한 필드명
                 "distance": 1.0 - score,  # 프론트엔드에서 사용하는 distance 필드 추가
                 "score": round(score, 2),
                 "category": category,
-                "name": name
+                "name": name,
+                "is_default": is_default
+            })
+        
+        print(f"✅ 추천 완료: {len(recommendations)}개")
+        return {
+            "success": True,
+            "recommendations": recommendations
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ 추천 오류: {e}")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"AI 추천 오류: {str(e)}"
+        )
+
+
+# ✅ 드레스 기반 추천 API (하의 또는 아우터 추천)
+@app.get("/api/recommendations/match-bottom-or-outer-for-dress/{item_id}")
+def get_recommendations_for_dress(item_id: int, n_results: int = 3, user_id: int = 1):
+    """드레스 아이템에 맞는 하의 또는 아우터 추천"""
+    
+    print(f"\n{'='*60}")
+    print(f"👗 드레스 기반 추천 요청 (item_id: {item_id}, user_id: {user_id})")
+    print(f"{'='*60}")
+    
+    try:
+        # 1. 기본 아이템 정보 확인
+        with pipeline.db_conn.cursor() as cur:
+            cur.execute("""
+                SELECT w.item_id, w.user_id, w.has_dress, d.category, d.color
+                FROM wardrobe_items w
+                LEFT JOIN top_attributes d ON w.item_id = d.item_id AND w.has_dress = TRUE
+                WHERE w.item_id = %s
+            """, (item_id,))
+            
+            base_item = cur.fetchone()
+            if not base_item:
+                raise HTTPException(
+                    status_code=404, 
+                    detail="아이템을 찾을 수 없습니다."
+                )
+            
+            base_user_id = base_item[1]
+            has_dress = base_item[2]
+            dress_category = base_item[3]
+            dress_color = base_item[4]
+            
+            print(f"  📋 기본 아이템: {dress_color or ''} {dress_category or ''} (드레스)")
+            
+            if not has_dress:
+                raise HTTPException(
+                    status_code=400, 
+                    detail="선택한 아이템이 드레스가 아닙니다."
+                )
+        
+        # 2. 사용자의 전체 옷장 아이템 개수 확인
+        with pipeline.db_conn.cursor() as cur:
+            cur.execute("""
+                SELECT COUNT(*) FROM wardrobe_items 
+                WHERE user_id = %s AND is_default = FALSE
+            """, (base_user_id,))
+            user_item_count = cur.fetchone()[0]
+        
+        print(f"  📊 사용자 옷장 아이템 개수: {user_item_count}개")
+        
+        # 3. 하의 또는 아우터 아이템들 검색
+        with pipeline.db_conn.cursor() as cur:
+            cur.execute("""
+                SELECT 
+                    w.item_id,
+                    w.original_image_path,
+                    w.user_id,
+                    w.has_bottom,
+                    w.has_outer,
+                    b.category as bottom_category,
+                    b.color as bottom_color,
+                    o.category as outer_category,
+                    o.color as outer_color
+                FROM wardrobe_items w
+                LEFT JOIN bottom_attributes b ON w.item_id = b.item_id AND w.has_bottom = TRUE
+                LEFT JOIN top_attributes o ON w.item_id = o.item_id AND w.has_outer = TRUE
+                WHERE w.user_id = %s 
+                AND (w.has_bottom = TRUE OR w.has_outer = TRUE)
+                AND w.item_id != %s
+            """, (base_user_id, item_id))
+            
+            candidate_items = cur.fetchall()
+        
+        # 4. 기본 아이템들도 함께 가져오기 (옷장이 20개 미만일 때)
+        default_items = []
+        if user_item_count < 20:
+            print(f"  🎯 옷장이 {user_item_count}개로 부족하여 기본 아이템도 추가합니다.")
+            with pipeline.db_conn.cursor() as cur:
+                cur.execute("""
+                    SELECT 
+                        w.item_id,
+                        w.original_image_path,
+                        w.user_id,
+                        w.has_bottom,
+                        w.has_outer,
+                        b.category as bottom_category,
+                        b.color as bottom_color,
+                        o.category as outer_category,
+                        o.color as outer_color
+                    FROM wardrobe_items w
+                    LEFT JOIN bottom_attributes b ON w.item_id = b.item_id AND w.has_bottom = TRUE
+                    LEFT JOIN top_attributes o ON w.item_id = o.item_id AND w.has_outer = TRUE
+                    WHERE w.is_default = TRUE
+                    AND (w.has_bottom = TRUE OR w.has_outer = TRUE)
+                    ORDER BY w.item_id
+                    LIMIT 5
+                """)
+                default_items = cur.fetchall()
+        
+        # 5. 모든 후보 아이템들 결합
+        all_candidates = list(candidate_items) + list(default_items)
+        
+        if not all_candidates:
+            return {
+                "success": True,
+                "recommendations": [],
+                "message": "추천할 하의 또는 아우터가 없습니다."
+            }
+        
+        # 6. AI 유사도 기반 추천 (간단한 구현)
+        recommendations = []
+        for item in all_candidates[:n_results]:
+            item_id, image_path, user_id, has_bottom, has_outer, bottom_cat, bottom_color, outer_cat, outer_color = item
+            
+            print(f"🔍 추천 아이템 {item_id}: image_path = {image_path}")
+            
+            # 이미지 경로가 None이면 건너뛰기
+            if not image_path:
+                print(f"  ⚠️ 이미지 경로가 None입니다. 건너뜁니다.")
+                continue
+            
+            # 간단한 유사도 점수 계산 (실제로는 AI 모델 사용)
+            score = 0.8  # 기본 점수
+            
+            # 파일명만 추출 (기존 API와 동일한 방식)
+            if image_path:
+                filename = Path(image_path).name
+            else:
+                filename = f"item_{item_id}.jpg"
+            
+            # 기본 아이템인지 확인
+            is_default = item in default_items
+            
+            recommendations.append({
+                "id": item_id,
+                "image_path": filename,  # 기존 API와 동일한 필드명
+                "distance": 1.0 - score,  # 프론트엔드에서 사용하는 distance 필드 추가
+                "score": round(score, 2),
+                "category": "하의" if has_bottom else "아우터",
+                "name": f"{bottom_color or outer_color or ''} {bottom_cat or outer_cat or ''}".strip(),
+                "is_default": is_default
             })
         
         print(f"✅ 추천 완료: {len(recommendations)}개")
