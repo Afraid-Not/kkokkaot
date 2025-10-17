@@ -5,6 +5,7 @@ import {
   ShoppingBag,
   Shirt as ShirtIcon,
   User as UserIcon,
+  MessageCircle,
 } from 'lucide-react-native';
 import React from 'react';
 import { View, Text, StyleSheet, Pressable, Alert as RNAlert } from 'react-native';
@@ -20,7 +21,7 @@ const navItems: { icon: any, title: string, screen: MainScreen }[] = [
   { icon: Home, title: '홈', screen: 'home' },
   { icon: ShirtIcon, title: '옷장', screen: 'wardrobe-management' },
   { icon: BarChart3, title: '분석', screen: 'style-analysis' },
-  { icon: UserIcon, title: '피팅', screen: 'virtual-fitting' },
+  { icon: MessageCircle, title: 'AI', screen: 'llm-chat' },
   { icon: ShoppingBag, title: '쇼핑', screen: 'shopping' },
 ];
 

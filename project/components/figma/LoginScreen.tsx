@@ -90,8 +90,9 @@ export default function LoginScreen({
 
       if (result.success) {
         // ✅ AsyncStorage에 사용자 정보 저장
-        await AsyncStorage.setItem('user', JSON.stringify(result.user));
+        await AsyncStorage.setItem('@kko/user', JSON.stringify(result.user));
         console.log('✅ 사용자 정보 저장 완료:', result.user);
+        console.log('🔍 저장된 user_id 타입:', typeof result.user.user_id);
         console.log('========================================\n');
 
         // 로그인 성공

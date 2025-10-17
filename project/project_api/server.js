@@ -70,7 +70,7 @@ app.post('/api/login', async (req, res) => {
       success: true,
       message: '로그인에 성공했습니다.',
       user: {
-        id: user.id,
+        user_id: user.id,  // ← user_id로 수정
         name: user.name, // DB에 저장된 실제 이름
         email: user.email,
       },

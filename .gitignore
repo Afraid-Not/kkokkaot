@@ -35,6 +35,7 @@ fashion_*.pth
 # User uploaded/processed images (업로드된 이미지만 무시)
 uploaded_images/
 processed_images/
+processed_default_images/
 API/default_items/
 temp/
 cache/

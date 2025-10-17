@@ -64,6 +64,41 @@ def recommend_default_items_to_user(pipeline, user_id, username):
     return recommended_count
 
 
+def clear_existing_default_items(pipeline):
+    """기존 기본 아이템들 삭제"""
+    print("🗑️ 기존 기본 아이템들 삭제 중...")
+    
+    with pipeline.db_conn.cursor() as cur:
+        # user_recommendations에서 기본 아이템 추천 삭제
+        cur.execute("""
+            DELETE FROM user_recommendations 
+            WHERE item_id IN (
+                SELECT item_id FROM wardrobe_items WHERE is_default = TRUE
+            )
+        """)
+        
+        # top_attributes, bottom_attributes에서 기본 아이템 속성 삭제
+        cur.execute("""
+            DELETE FROM top_attributes 
+            WHERE item_id IN (
+                SELECT item_id FROM wardrobe_items WHERE is_default = TRUE
+            )
+        """)
+        
+        cur.execute("""
+            DELETE FROM bottom_attributes 
+            WHERE item_id IN (
+                SELECT item_id FROM wardrobe_items WHERE is_default = TRUE
+            )
+        """)
+        
+        # wardrobe_items에서 기본 아이템 삭제
+        cur.execute("DELETE FROM wardrobe_items WHERE is_default = TRUE")
+        
+        pipeline.db_conn.commit()
+        print("✅ 기존 기본 아이템들 삭제 완료\n")
+
+
 def seed_default_items():
     """기본 아이템들을 DB에 삽입"""
     
@@ -74,9 +109,9 @@ def seed_default_items():
     # 파이프라인 초기화 (4개 카테고리 지원, Pose 제외, Background Remover 포함)
     pipeline = FashionPipeline(
         yolo_pose_path=None,  # Pose 모델 불필요
-        yolo_detection_path="./API/pre_trained_weights/yolo_best.pt",  # 4개 카테고리 감지만 사용
-        top_model_path="./API/pre_trained_weights/fashion_top_model.pth",
-        bottom_model_path="./API/pre_trained_weights/fashion_bottom_model.pth",
+        yolo_detection_path="D:/kkokkaot/API/pre_trained_weights/yolo_best.pt",  # 4개 카테고리 감지만 사용
+        top_model_path="D:/kkokkaot/API/pre_trained_weights/fashion_top_model.pth",
+        bottom_model_path="D:/kkokkaot/API/pre_trained_weights/fashion_bottom_model.pth",
         chroma_path="./chroma_db",
         db_config={
             'host': 'localhost',
@@ -88,6 +123,9 @@ def seed_default_items():
     )
     
     try:
+        # 0. 기존 기본 아이템들 삭제
+        clear_existing_default_items(pipeline)
+        
         # 1. 시스템 사용자 생성 (user_id = 0)
         with pipeline.db_conn.cursor() as cur:
             cur.execute("""
@@ -148,22 +186,27 @@ def seed_default_items():
                 )
                 
                 if result['success']:
-                    # is_default = TRUE로 업데이트
+                    # is_default = TRUE로 업데이트하고 original_image_path를 원본 파일명으로 설정
                     with pipeline.db_conn.cursor() as cur:
                         cur.execute("""
                             UPDATE wardrobe_items 
-                            SET is_default = TRUE, gender = 'unisex'
+                            SET is_default = TRUE, gender = 'unisex', original_image_path = %s
                             WHERE item_id = %s
-                        """, (result['item_id'],))
+                        """, (image_file, result['item_id']))
                         pipeline.db_conn.commit()
                     
-                    print(f"   ✅ 완료: item_id={result['item_id']}")
+                    print(f"   ✅ 완료: item_id={result['item_id']}, 원본파일: {image_file}")
                     
-                    # 상의/하의 정보 출력
-                    if result.get('top_attributes'):
-                        print(f"      👕 상의: {result['top_attributes']['category']} ({result['top_attributes']['color']})")
-                    if result.get('bottom_attributes'):
-                        print(f"      👖 하의: {result['bottom_attributes']['category']} ({result['bottom_attributes']['color']})")
+                    # 감지된 카테고리 정보 출력
+                    detection_result = result.get('detection_result', {})
+                    if detection_result.get('has_top'):
+                        print(f"      👕 상의: {result.get('top_attributes', {}).get('category', 'unknown')} ({result.get('top_attributes', {}).get('color', 'unknown')})")
+                    if detection_result.get('has_bottom'):
+                        print(f"      👖 하의: {result.get('bottom_attributes', {}).get('category', 'unknown')} ({result.get('bottom_attributes', {}).get('color', 'unknown')})")
+                    if detection_result.get('has_outer'):
+                        print(f"      🧥 아우터: {result.get('outer_attributes', {}).get('category', 'unknown')} ({result.get('outer_attributes', {}).get('color', 'unknown')})")
+                    if detection_result.get('has_dress'):
+                        print(f"      👗 드레스: {result.get('dress_attributes', {}).get('category', 'unknown')} ({result.get('dress_attributes', {}).get('color', 'unknown')})")
                     
                     print()
                     success_count += 1

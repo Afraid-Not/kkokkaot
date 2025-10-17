@@ -75,7 +75,7 @@ export default function WardrobeManagement({
 
     setLoading(true);
     try {
-      const url = `${API_BASE_URL}/api/wardrobe/${userId}?include_defaults=true`;
+      const url = `${API_BASE_URL}/api/wardrobe/${userId}?include_defaults=false`;
       console.log('\n========================================');
       console.log('🔍 옷장 조회 시작');
       console.log('👤 user_id:', userId);
@@ -113,22 +113,39 @@ export default function WardrobeManagement({
           if (item.has_top) categories.push('top');
           if (item.has_bottom) categories.push('bottom');
           
-          // 우선순위: 드레스 > 아우터 > 상의 > 하의
-          if (categories.includes('dress')) {
-            name = `드레스 ${item.id}`;
-            category = 'dress';
-          } else if (categories.includes('outer')) {
-            name = `아우터 ${item.id}`;
-            category = 'outer';
-          } else if (categories.includes('top')) {
-            name = `${item.top_color || ''} ${item.top_category || ''}`.trim() || `상의 ${item.id}`;
-            category = 'top';
-          } else if (categories.includes('bottom')) {
-            name = `${item.bottom_color || ''} ${item.bottom_category || ''}`.trim() || `하의 ${item.id}`;
-            category = 'bottom';
-          } else {
+          // ✅ 감지된 카테고리들을 조합하여 이름 생성
+          if (categories.length === 0) {
             name = `아이템 ${item.id}`;
             category = 'all';
+          } else if (categories.length === 1) {
+            // 단일 카테고리
+            const singleCategory = categories[0];
+            if (singleCategory === 'dress') {
+              name = '드레스';
+              category = 'dress';
+            } else if (singleCategory === 'outer') {
+              name = '아우터';
+              category = 'outer';
+            } else if (singleCategory === 'top') {
+              name = '상의';
+              category = 'top';
+            } else if (singleCategory === 'bottom') {
+              name = '하의';
+              category = 'bottom';
+            }
+          } else {
+            // 다중 카테고리 - 감지된 카테고리들을 "/"로 연결
+            const categoryNames = categories.map(cat => {
+              switch(cat) {
+                case 'dress': return '드레스';
+                case 'outer': return '아우터';
+                case 'top': return '상의';
+                case 'bottom': return '하의';
+                default: return cat;
+              }
+            });
+            name = categoryNames.join(' / ');
+            category = categories[0]; // 첫 번째 카테고리를 메인으로
           }
           
           // ✅ 이미지 URL 생성 (선택된 카테고리에 따라 다른 이미지 표시)
@@ -142,14 +159,25 @@ export default function WardrobeManagement({
           console.log(`  - outer_image: ${item.outer_image}`);
           console.log(`  - dress_image: ${item.dress_image}`);
           
-          // 전체 이미지 우선 확인 (full 카테고리)
-          if (item.image_category === 'full') {
-            imageUrl = `${API_BASE_URL}/api/processed-images/full/${item.image_path}`;
+          // full_image가 있으면 우선 사용
+          if (item.full_image) {
+            imageUrl = `${API_BASE_URL}${item.full_image}`;
+          } else if (item.image_category === 'full') {
+            // 사용자 아이템인 경우 사용자별 경로 사용
+            if (item.is_default) {
+              imageUrl = `${API_BASE_URL}/api/processed-images/full/${item.image_path}`;
+            } else {
+              imageUrl = `${API_BASE_URL}/api/processed-images/user_${userId}/full/${item.image_path}`;
+            }
           } else if (item.image_category === 'original') {
             imageUrl = `${API_BASE_URL}/api/images/${item.image_path}`;
           } else if (item.image_category) {
             // top, bottom, outer, dress
-            imageUrl = `${API_BASE_URL}/api/processed-images/${item.image_category}/${item.image_path}`;
+            if (item.is_default) {
+              imageUrl = `${API_BASE_URL}/api/processed-images/${item.image_category}/${item.image_path}`;
+            } else {
+              imageUrl = `${API_BASE_URL}/api/processed-images/user_${userId}/${item.image_category}/${item.image_path}`;
+            }
           } else {
             // 카테고리 정보가 없으면 원본 경로 사용
             imageUrl = `${API_BASE_URL}/api/images/${item.image_path}`;
@@ -217,7 +245,7 @@ export default function WardrobeManagement({
   useEffect(() => {
     const loadUser = async () => {
       try {
-        const userStr = await AsyncStorage.getItem('user');
+        const userStr = await AsyncStorage.getItem('@kko/user');
         if (userStr) {
           const user = JSON.parse(userStr);
           setUserId(user.user_id);
@@ -286,12 +314,16 @@ export default function WardrobeManagement({
       console.log(`\n🔍 상세 정보 요청: ${url}`);
       
       const response = await fetch(url);
+      console.log(`📡 상세 정보 응답 상태: ${response.status}`);
+      
       const data = await response.json();
+      console.log(`📦 상세 정보 응답 데이터:`, data);
       
       if (data.success && data.item) {
         setSelectedItemDetail(data.item);
         setShowDetailModal(true);
       } else {
+        console.error('❌ 상세 정보 조회 실패:', data);
         Alert.alert('오류', data.message || '상세 정보를 불러올 수 없습니다.');
       }
     } catch (error) {
@@ -377,7 +409,21 @@ export default function WardrobeManagement({
           message += `👖 하의\n`;
           message += `• ${data.bottom_attributes.category}\n`;
           message += `• ${data.bottom_attributes.color}\n`;
-          message += `• ${data.bottom_attributes.fit}핏\n`;
+          message += `• ${data.bottom_attributes.fit}핏\n\n`;
+        }
+        
+        if (data.outer_attributes) {
+          message += `🧥 아우터\n`;
+          message += `• ${data.outer_attributes.category}\n`;
+          message += `• ${data.outer_attributes.color}\n`;
+          message += `• ${data.outer_attributes.fit}핏\n\n`;
+        }
+        
+        if (data.dress_attributes) {
+          message += `👗 드레스\n`;
+          message += `• ${data.dress_attributes.category}\n`;
+          message += `• ${data.dress_attributes.color}\n`;
+          message += `• ${data.dress_attributes.fit}핏\n`;
         }
         
         Alert.alert('업로드 성공!', message, [
@@ -390,7 +436,16 @@ export default function WardrobeManagement({
           }
         ]);
       } else {
-        Alert.alert('업로드 실패', data.message || '다시 시도해주세요.');
+        // ✅ 의류 감지 실패 시 특별한 알림
+        if (data.error_type === 'detection_failed') {
+          Alert.alert(
+            '의류가 확인되지 않습니다', 
+            `저장되지 않았습니다.\n\n이유) ${data.error_details || '이미지에서 의류를 찾을 수 없습니다.'}\n\n💡 해결 방법:\n• 의류가 명확하게 보이는 사진을 사용해주세요\n• 배경이 복잡하지 않은 사진을 권장합니다\n• 의류가 이미지 중앙에 위치하도록 촬영해주세요`,
+            [{ text: '확인' }]
+          );
+        } else {
+          Alert.alert('업로드 실패', data.message || '다시 시도해주세요.');
+        }
       }
     } catch (error) {
       console.error('❌ 업로드 에러:', error);
@@ -570,11 +625,11 @@ export default function WardrobeManagement({
             </View>
 
             {/* ✅ 전체 이미지 섹션 추가 */}
-            {item.full_image_path && (
+            {item.original_image_path && (
               <View style={styles.modalSection}>
                 <Text style={styles.modalSectionTitle}>📸 전체 이미지</Text>
                 <Image 
-                  source={{ uri: `${API_BASE_URL}${item.full_image_path}` }} 
+                  source={{ uri: `${API_BASE_URL}/api/processed-images/user_3/full/item_${item.item_id}_full.jpg` }} 
                   style={styles.modalOriginalImage}
                   resizeMode="contain"
                 />
@@ -592,13 +647,11 @@ export default function WardrobeManagement({
                   {item.is_outer ? '🧥 아우터' : '👕 상의'}
                 </Text>
                 
-                {item.top_image_path && (
-                  <Image 
-                    source={{ uri: `${API_BASE_URL}${item.top_image_path}` }} 
-                    style={styles.modalSeparatedImage}
-                    resizeMode="contain"
-                  />
-                )}
+                <Image 
+                  source={{ uri: `${API_BASE_URL}/api/processed-images/user_3/top/item_${item.item_id}_top.jpg` }} 
+                  style={styles.modalSeparatedImage}
+                  resizeMode="contain"
+                />
                 
                 <View style={styles.modalInfoBox}>
                   <View style={styles.modalInfoRow}>
@@ -637,13 +690,11 @@ export default function WardrobeManagement({
                 <Text style={styles.modalSectionTitle}>👖 하의</Text>
                 
                 {/* 하의 이미지 */}
-                {item.bottom_image_path && (
-                  <Image 
-                    source={{ uri: `${API_BASE_URL}/api/processed-images/item_${item.item_id}_bottom.jpg` }} 
-                    style={styles.modalSeparatedImage}
-                    resizeMode="contain"
-                  />
-                )}
+                <Image 
+                  source={{ uri: `${API_BASE_URL}/api/processed-images/user_3/bottom/item_${item.item_id}_bottom.jpg` }} 
+                  style={styles.modalSeparatedImage}
+                  resizeMode="contain"
+                />
                 
                 <View style={styles.modalInfoBox}>
                   <View style={styles.modalInfoRow}>
@@ -670,6 +721,100 @@ export default function WardrobeManagement({
                       {Array.isArray(item.bottom_attributes.materials) 
                         ? item.bottom_attributes.materials.join(', ') 
                         : item.bottom_attributes.materials}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+            )}
+
+            {/* 아우터 정보 */}
+            {item.has_outer && (
+              <View style={styles.modalSection}>
+                <Text style={styles.modalSectionTitle}>🧥 아우터</Text>
+                
+                <Image 
+                  source={{ uri: `${API_BASE_URL}/api/processed-images/user_3/outer/item_${item.item_id}_outer.jpg` }} 
+                  style={styles.modalSeparatedImage}
+                  resizeMode="contain"
+                />
+                
+                <View style={styles.modalInfoBox}>
+                  <View style={styles.modalInfoRow}>
+                    <Text style={styles.modalLabel}>카테고리</Text>
+                    <Text style={styles.modalValue}>
+                      {item.outer_attributes?.category || 'N/A'} 
+                      {item.outer_attributes?.category_confidence ? ` (${Math.round(item.outer_attributes.category_confidence * 100)}%)` : ''}
+                    </Text>
+                  </View>
+                  <View style={styles.modalInfoRow}>
+                    <Text style={styles.modalLabel}>색상</Text>
+                    <Text style={styles.modalValue}>
+                      {item.outer_attributes?.color || 'N/A'} 
+                      {item.outer_attributes?.color_confidence ? ` (${Math.round(item.outer_attributes.color_confidence * 100)}%)` : ''}
+                    </Text>
+                  </View>
+                  <View style={styles.modalInfoRow}>
+                    <Text style={styles.modalLabel}>핏</Text>
+                    <Text style={styles.modalValue}>
+                      {item.outer_attributes?.fit || 'N/A'} 
+                      {item.outer_attributes?.fit_confidence ? ` (${Math.round(item.outer_attributes.fit_confidence * 100)}%)` : ''}
+                    </Text>
+                  </View>
+                  <View style={styles.modalInfoRow}>
+                    <Text style={styles.modalLabel}>소재</Text>
+                    <Text style={styles.modalValue}>
+                      {item.outer_attributes?.materials 
+                        ? (Array.isArray(item.outer_attributes.materials) 
+                            ? item.outer_attributes.materials.join(', ') 
+                            : item.outer_attributes.materials)
+                        : 'N/A'}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+            )}
+
+            {/* 드레스 정보 */}
+            {item.has_dress && (
+              <View style={styles.modalSection}>
+                <Text style={styles.modalSectionTitle}>👗 드레스</Text>
+                
+                <Image 
+                  source={{ uri: `${API_BASE_URL}/api/processed-images/user_3/dress/item_${item.item_id}_dress.jpg` }} 
+                  style={styles.modalSeparatedImage}
+                  resizeMode="contain"
+                />
+                
+                <View style={styles.modalInfoBox}>
+                  <View style={styles.modalInfoRow}>
+                    <Text style={styles.modalLabel}>카테고리</Text>
+                    <Text style={styles.modalValue}>
+                      {item.dress_attributes?.category || 'N/A'} 
+                      {item.dress_attributes?.category_confidence ? ` (${Math.round(item.dress_attributes.category_confidence * 100)}%)` : ''}
+                    </Text>
+                  </View>
+                  <View style={styles.modalInfoRow}>
+                    <Text style={styles.modalLabel}>색상</Text>
+                    <Text style={styles.modalValue}>
+                      {item.dress_attributes?.color || 'N/A'} 
+                      {item.dress_attributes?.color_confidence ? ` (${Math.round(item.dress_attributes.color_confidence * 100)}%)` : ''}
+                    </Text>
+                  </View>
+                  <View style={styles.modalInfoRow}>
+                    <Text style={styles.modalLabel}>핏</Text>
+                    <Text style={styles.modalValue}>
+                      {item.dress_attributes?.fit || 'N/A'} 
+                      {item.dress_attributes?.fit_confidence ? ` (${Math.round(item.dress_attributes.fit_confidence * 100)}%)` : ''}
+                    </Text>
+                  </View>
+                  <View style={styles.modalInfoRow}>
+                    <Text style={styles.modalLabel}>소재</Text>
+                    <Text style={styles.modalValue}>
+                      {item.dress_attributes?.materials 
+                        ? (Array.isArray(item.dress_attributes.materials) 
+                            ? item.dress_attributes.materials.join(', ') 
+                            : item.dress_attributes.materials)
+                        : 'N/A'}
                     </Text>
                   </View>
                 </View>

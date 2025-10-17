@@ -9,9 +9,9 @@ import {
   Pressable,
   ActivityIndicator,
   Alert,
-  TextInput,        // 👈 추가
-  KeyboardAvoidingView,  // 👈 추가
-  Platform,         // 👈 이미 있으면 생략
+  TextInput,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
@@ -21,9 +21,9 @@ import {
   MapPin,
   RefreshCw,
   Zap,
-  MessageCircle,  // 👈 추가
-  Send,           // 👈 추가
-  X,              // 👈 추가
+  MessageCircle,
+  Send,
+  X,
 } from 'lucide-react-native';
 import AppHeader from '../common/AppHeader';
 import BottomNavBar from '../common/BottomNavBar';
@@ -52,6 +52,15 @@ type Rec = {
   score: number;
   reason: string;
   is_default?: boolean;
+  detailed_scores?: {
+    color_harmony: number;
+    material_combination: number;
+    fit_combination: number;
+    style_combination: number;
+    seasonal_suitability: number;
+    category_compatibility: number;
+  };
+  explanation?: string;
 };
 
 type ChatMessage = {
@@ -71,6 +80,7 @@ type WardrobeItem = {
   bottom_category?: string;
   outer_category?: string;
   dress_category?: string;
+  full_image?: string;
   top_image?: string;
   bottom_image?: string;
   outer_image?: string;
@@ -79,9 +89,9 @@ type WardrobeItem = {
   has_bottom?: boolean;
   has_outer?: boolean;
   has_dress?: boolean;
+  is_default?: boolean;
 };
 
-// ✅ 코드 변경 강제 트리거 - v2.0
 export default function DailyOutfitRecommendation({
   onBack,
   onNavigate,
@@ -96,23 +106,31 @@ export default function DailyOutfitRecommendation({
   const [recommendations, setRecommendations] = useState<Rec[]>([]);
   const [baseItemId, setBaseItemId] = useState<number | null>(null); 
   const [selectedPart, setSelectedPart] = useState<'top' | 'bottom' | 'outer' | 'dress'>('top');
+  const [defaultRecommendations, setDefaultRecommendations] = useState<WardrobeItem[]>([]);
   const [showChat, setShowChat] = useState(false);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState('');
   const [chatLoading, setChatLoading] = useState(false);
   const [chatRecommendations, setChatRecommendations] = useState<WardrobeItem[]>([]);
-  const [defaultRecommendations, setDefaultRecommendations] = useState<WardrobeItem[]>([]);
+  const [weather, setWeather] = useState({
+    temperature: 22,
+    description: '맑음',
+    icon: '☁️',
+    styleTip: '가벼운 레이어드 스타일링 추천',
+    date: todayStr
+  });
 
-  
   const baseItem = useMemo(() => {
       if (baseItemId === null && wardrobeItems.length > 0) {
-          setBaseItemId(wardrobeItems[0].id);
-          return wardrobeItems[0];
+          // 사용자 아이템 중 첫 번째 아이템을 자동 선택
+          const userItems = wardrobeItems.filter(item => !item.is_default);
+          if (userItems.length > 0) {
+              setBaseItemId(userItems[0].id);
+              return userItems[0];
+          }
       }
       return wardrobeItems.find(item => item.id === baseItemId) || null;
   }, [wardrobeItems, baseItemId]);
-  
-
 
   const avgScore =
     recommendations.length > 0
@@ -126,268 +144,374 @@ export default function DailyOutfitRecommendation({
     return d.toLocaleDateString('ko-KR', { month: 'long', day: 'numeric' });
   }, []);
 
-  // 옷장 데이터 불러오기
-  const fetchWardrobe = useCallback(async (id: number) => {
+  // 날씨 데이터 불러오기
+  const fetchWeather = useCallback(async () => {
     try {
-      const url = `${API_BASE_URL}/api/wardrobe/${id}`;
-      const response = await fetch(url);
-      
-      const contentType = response.headers.get('content-type');
-      if (response.status !== 200 || !contentType || !contentType.includes('application/json')) {
-        console.error(`❌ 옷장 조회 실패: 상태 코드 ${response.status}`);
-        const errorText = await response.text();
-        console.error('서버 응답:', errorText.substring(0, 500));
-        Alert.alert('서버 오류', `옷장 목록을 불러올 수 없습니다 (Status: ${response.status})`);
-        setWardrobeItems([]);
-        return;
+      const response = await fetch(`${API_BASE_URL}/api/weather?city=Seoul`);
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success) {
+          setWeather({
+            temperature: data.temperature,
+            description: data.description,
+            icon: data.icon,
+            styleTip: data.style_tip,
+            date: data.date
+          });
+        }
       }
+    } catch (error) {
+      console.error('❌ 날씨 데이터 로드 실패:', error);
+    }
+  }, []);
 
-      const data = await response.json();
-
-      if (data.success && data.items.length > 0) {
-        const loadedItems: WardrobeItem[] = data.items.map((item: any) => {
-            // ✅ 우선순위: 드레스 > 아우터 > 상의 > 하의
-            let name = '';
-            let category = '';
-            
-            if (item.has_dress) {
-              name = `${item.dress_color || ''} ${item.dress_category}`.trim();
-              category = '드레스';
-            } else if (item.has_outer) {
-              name = `${item.outer_color || ''} ${item.outer_category}`.trim();
-              category = '아우터';
-            } else if (item.has_top) {
-              name = `${item.top_color || ''} ${item.top_category}`.trim();
-              category = '상의';
-            } else if (item.has_bottom) {
-              name = `${item.bottom_color || ''} ${item.bottom_category}`.trim();
-              category = '하의';
-            } else {
-              name = '새 아이템';
-            }
-            
-            // ✅ 카테고리별 이미지 URL 생성 (수정!)
+  // 옷장 데이터 불러오기
+  const fetchWardrobe = useCallback(async () => {
+    if (!userId) {
+      console.log('❌ userId 없음, 옷장 데이터 로드 건너뜀');
+      return;
+    }
+    
+    console.log('🔄 옷장 데이터 로드 시작, userId:', userId);
+    
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/wardrobe/${userId}?include_defaults=false`);
+      console.log('📡 옷장 API 응답 상태:', response.status);
+      
+      if (response.ok) {
+        const data = await response.json();
+        console.log('✅ 옷장 데이터 로드 성공:', data.items?.length || 0, '개');
+        console.log('📦 원본 데이터:', data);
+        
+        if (data.items && data.items.length > 0) {
+          // 중복 제거 및 이미지 URL 생성
+          const uniqueItems = data.items.filter((item: WardrobeItem, index: number, self: WardrobeItem[]) => 
+            index === self.findIndex((t: WardrobeItem) => t.id === item.id)
+          ).map((item: any) => {
+            // 이미지 URL 생성 (image_category가 'original'인 경우 'full'로 변경)
+            const imageCategory = item.image_category === 'original' ? 'full' : (item.image_category || 'full');
             let imageUrl = '';
             
-            console.log(`🖼️ Daily - 이미지 URL 생성 중 - item ${item.id}:`);
-            console.log(`  - image_path: ${item.image_path}`);
-            console.log(`  - image_category: ${item.image_category}`);
-            
-            if (item.image_category === 'original') {
-              imageUrl = `${API_BASE_URL}/api/images/${item.image_path}`;
-            } else if (item.image_category) {
-              // full, top, bottom, outer
-              imageUrl = `${API_BASE_URL}/api/processed-images/${item.image_category}/${item.image_path}`;
+            // full_image가 있으면 우선 사용, 없으면 image_path 사용
+            if (item.full_image) {
+              imageUrl = `${API_BASE_URL}${item.full_image}`;
+            } else if (item.image_path) {
+              // 기본 아이템인 경우 default-images API 사용
+              if (item.is_default) {
+                imageUrl = `${API_BASE_URL}/api/default-images/${item.image_path}`;
+              } else {
+                // 사용자 아이템인 경우 사용자별 processed-images API 사용
+                // image_path가 item_xxx_full.jpg 형태인지 확인
+                if (item.image_path.startsWith('item_') && item.image_path.includes('_full.jpg')) {
+                  imageUrl = `${API_BASE_URL}/api/processed-images/user_${userId}/${imageCategory}/${item.image_path}`;
+                } else {
+                  // 원본 파일명인 경우 item_xxx_full.jpg 형태로 변환
+                  imageUrl = `${API_BASE_URL}/api/processed-images/user_${userId}/${imageCategory}/item_${item.id}_full.jpg`;
+                }
+              }
             } else {
-              // 카테고리 정보가 없으면 원본 경로 사용
-              imageUrl = `${API_BASE_URL}/api/images/${item.image_path}`;
+              // 폴백: images 디렉토리에서 시도
+              imageUrl = `${API_BASE_URL}/api/images/item_${item.id}.jpg`;
             }
             
-            console.log(`  ✅ 생성된 URL: ${imageUrl}`);
-
+            // 카테고리별 이미지 URL 생성 (기본 아이템인 경우 default-images API 사용)
+            const topImageUrl = item.top_image 
+              ? (item.is_default 
+                  ? `${API_BASE_URL}/api/default-images/${item.top_image.split('/').pop()}`
+                  : item.top_image.startsWith('/api/') 
+                    ? `${API_BASE_URL}${item.top_image}`
+                    : `${API_BASE_URL}/api/processed-images/user_${userId}/top/item_${item.id}_top.jpg`)
+              : null;
+            const bottomImageUrl = item.bottom_image 
+              ? (item.is_default 
+                  ? `${API_BASE_URL}/api/default-images/${item.bottom_image.split('/').pop()}`
+                  : item.bottom_image.startsWith('/api/') 
+                    ? `${API_BASE_URL}${item.bottom_image}`
+                    : `${API_BASE_URL}/api/processed-images/user_${userId}/bottom/item_${item.id}_bottom.jpg`)
+              : null;
+            const outerImageUrl = item.outer_image 
+              ? (item.is_default 
+                  ? `${API_BASE_URL}/api/default-images/${item.outer_image.split('/').pop()}`
+                  : item.outer_image.startsWith('/api/') 
+                    ? `${API_BASE_URL}${item.outer_image}`
+                    : `${API_BASE_URL}/api/processed-images/user_${userId}/outer/item_${item.id}_outer.jpg`)
+              : null;
+            const dressImageUrl = item.dress_image 
+              ? (item.is_default 
+                  ? `${API_BASE_URL}/api/default-images/${item.dress_image.split('/').pop()}`
+                  : item.dress_image.startsWith('/api/') 
+                    ? `${API_BASE_URL}${item.dress_image}`
+                    : `${API_BASE_URL}/api/processed-images/user_${userId}/dress/item_${item.id}_dress.jpg`)
+              : null;
+            
+            // 이름 생성 (카테고리 기반)
+            let name = '';
+            if (item.has_dress) name = '드레스';
+            else if (item.has_outer) name = '아우터';
+            else if (item.has_top && item.has_bottom) name = '상의 / 하의';
+            else if (item.has_top) name = '상의';
+            else if (item.has_bottom) name = '하의';
+            else name = `아이템 ${item.id}`;
+            
             return {
-              id: item.id,
-              name: name || '새 아이템',
-              brand: 'My Wardrobe',
+              ...item,
               image: imageUrl,
-              category: category,
+              top_image: topImageUrl,
+              bottom_image: bottomImageUrl,
+              outer_image: outerImageUrl,
+              dress_image: dressImageUrl,
+              name: name,
+              brand: 'My Wardrobe',
+              category: item.has_top ? 'top' : item.has_bottom ? 'bottom' : item.has_outer ? 'outer' : item.has_dress ? 'dress' : 'other',
               loved: false,
-              top_category: item.top_category,
-              bottom_category: item.bottom_category,
-              outer_category: item.outer_category,
-              dress_category: item.dress_category,
-              top_image: item.top_image ? `${API_BASE_URL}${item.top_image}` : undefined,
-              bottom_image: item.bottom_image ? `${API_BASE_URL}${item.bottom_image}` : undefined,
-              outer_image: item.outer_image ? `${API_BASE_URL}${item.outer_image}` : undefined,
-              dress_image: item.dress_image ? `${API_BASE_URL}${item.dress_image}` : undefined,
-              has_top: item.has_top,
-              has_bottom: item.has_bottom,
-              has_outer: item.has_outer,
-              has_dress: item.has_dress,
             };
-        });
-        
-        // ✅ 중복 제거 (같은 ID를 가진 아이템 제거)
-        const uniqueItems = loadedItems.filter((item, index, self) => 
-          index === self.findIndex(t => t.id === item.id)
-        );
-        
-        setWardrobeItems(uniqueItems);
-        
-        if (loadedItems.length > 0 && baseItemId === null) {
-            setBaseItemId(loadedItems[0].id);
-        }
-        
-        // ✅ baseItemId가 변경될 때 selectedPart를 아이템의 실제 카테고리로 설정
-        if (baseItemId && loadedItems.length > 0) {
-            const currentItem = loadedItems.find(item => item.id === baseItemId);
-            if (currentItem) {
-                let newSelectedPart = '';
-                if (currentItem.has_dress) {
-                    newSelectedPart = 'dress';
-                } else if (currentItem.has_outer) {
-                    newSelectedPart = 'outer';
-                } else if (currentItem.has_top) {
-                    newSelectedPart = 'top';
-                } else if (currentItem.has_bottom) {
-                    newSelectedPart = 'bottom';
-                }
-                
-                if (newSelectedPart && newSelectedPart !== selectedPart) {
-                    console.log(`🔄 아이템 ${baseItemId} 선택으로 인한 추천 방식 변경: ${selectedPart} → ${newSelectedPart}`);
-                    setSelectedPart(newSelectedPart);
-                }
-            }
+          });
+          
+          console.log('🔄 중복 제거 후 아이템 수:', uniqueItems.length);
+          console.log('🖼️ 첫 번째 아이템 이미지 URL:', uniqueItems[0]?.image);
+          setWardrobeItems(uniqueItems);
+        } else {
+          console.log('⚠️ 옷장에 아이템이 없음');
+          setWardrobeItems([]);
         }
       } else {
+        console.error('❌ 옷장 데이터 로드 실패:', response.status);
         setWardrobeItems([]);
       }
     } catch (error) {
       console.error('❌ 옷장 데이터 로드 실패:', error);
-      Alert.alert('네트워크 오류', `서버 연결에 실패했습니다. ngrok 주소를 확인하세요.`);
+      setWardrobeItems([]);
     }
-  }, [baseItemId]); 
+  }, [userId]);
 
-  
-  // ✨ AI 추천 요청 (수정: 아이템의 실제 카테고리 기반 추천)
-  const fetchRecommendation = async () => {
-    if (!baseItem) {
-      Alert.alert('알림', '추천 기준이 될 아이템을 먼저 선택해주세요.');
-      return;
-    }
+  // 기본 추천 아이템 불러오기
+  const fetchDefaultRecommendations = useCallback(async () => {
+    if (!userId) return;
     
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/recommendations/default/${userId}`);
+      if (response.ok) {
+        const data = await response.json();
+        console.log('✅ 기본 추천 아이템 로드 성공:', data.length, '개');
+        setDefaultRecommendations(data);
+      } else {
+        console.error('❌ 기본 추천 아이템 로드 실패:', response.status);
+      }
+    } catch (error) {
+      console.error('❌ 기본 추천 아이템 로드 실패:', error);
+    }
+  }, [userId]);
+
+  // 사용자 ID 불러오기
+  useEffect(() => {
+    const loadUserId = async () => {
+      try {
+        const userData = await AsyncStorage.getItem('@kko/user');
+        if (userData) {
+          const user = JSON.parse(userData);
+          console.log('🔍 사용자 데이터 로드:', user);
+          
+          // user_id가 숫자인지 확인하고 설정
+          if (user.user_id && typeof user.user_id === 'number') {
+            setUserId(user.user_id);
+          } else if (user.id && typeof user.id === 'number') {
+            setUserId(user.id);
+          } else if (user.id === 'local-user') {
+            // local-user인 경우 기본값으로 1 사용 (개발용)
+            console.log('⚠️ local-user 감지, 기본값 1 사용');
+            setUserId(1);
+          } else {
+            console.log('❌ 유효한 user_id 없음:', user);
+            setLoading(false);
+          }
+        } else {
+          console.log('❌ 사용자 데이터 없음');
+          setLoading(false);
+        }
+      } catch (error) {
+        console.error('사용자 ID 로드 실패:', error);
+        setLoading(false);
+      }
+    };
+    loadUserId();
+  }, []);
+
+  useEffect(() => {
+    if (userId) {
+      const loadData = async () => {
+        try {
+          console.log('🔄 데이터 로드 시작, userId:', userId);
+          // 10초 타임아웃 설정
+          const timeoutPromise = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('로딩 타임아웃')), 10000)
+          );
+          
+          await Promise.race([
+            Promise.all([
+              fetchWardrobe(),
+              fetchDefaultRecommendations(),
+              fetchWeather()
+            ]),
+            timeoutPromise
+          ]);
+          console.log('✅ 데이터 로드 완료');
+        } catch (error) {
+          console.error('데이터 로드 실패:', error);
+        } finally {
+          console.log('🔄 로딩 상태 해제');
+          setLoading(false);
+        }
+      };
+      loadData();
+    } else {
+      // userId가 null이거나 undefined인 경우
+      console.log('❌ userId 없음, 로딩 해제');
+      setLoading(false);
+    }
+  }, [userId, fetchWardrobe, fetchDefaultRecommendations, fetchWeather]);
+
+  // baseItem이 변경될 때 selectedPart 자동 설정
+  useEffect(() => {
+    if (baseItem) {
+      if (baseItem.has_dress) {
+        setSelectedPart('dress');
+      } else if (baseItem.has_outer) {
+        setSelectedPart('outer');
+      } else if (baseItem.has_top) {
+        setSelectedPart('top');
+      } else if (baseItem.has_bottom) {
+        setSelectedPart('bottom');
+      }
+    }
+  }, [baseItem]);
+
+  // 고급 추천 시스템 사용
+  const fetchRecommendation = async () => {
+    if (!baseItem || baseItem.is_default || !userId || recommending) return;
+
     setRecommending(true);
+    setRecommendations([]);
 
     try {
-      // ✅ 아이템의 실제 카테고리 확인 (우선순위: 드레스 > 아우터 > 상의 > 하의)
-      let actualCategory = '';
-      if (baseItem.has_dress) {
-        actualCategory = 'dress';
-      } else if (baseItem.has_outer) {
-        actualCategory = 'outer';
-      } else if (baseItem.has_top) {
-        actualCategory = 'top';
-      } else if (baseItem.has_bottom) {
-        actualCategory = 'bottom';
-      } else {
-        Alert.alert('오류', '선택한 아이템의 카테고리를 확인할 수 없습니다.');
-        setRecommending(false);
-        return;
-      }
+      const response = await fetch(`${API_BASE_URL}/api/recommendations/advanced/${baseItem.id}?user_id=${userId}&n_results=10`);
       
-      console.log(`🎯 아이템 ${baseItem.id}의 실제 카테고리: ${actualCategory}`);
-      console.log(`🎯 사용자가 선택한 추천 방식: ${selectedPart}`);
-      
-      // ✅ 실제 카테고리에 따라 다른 엔드포인트 호출
-      let url = '';
-      
-      if (actualCategory === 'top') {
-        // 상의 → 하의 or 아우터 추천
-        url = `${API_BASE_URL}/api/recommendations/match-bottom-or-outer/${baseItem.id}?n_results=3&user_id=${userId}`;
-      } else if (actualCategory === 'bottom') {
-        // 하의 → 상의 or 아우터+상의 추천
-        url = `${API_BASE_URL}/api/recommendations/match-top-or-outer-top/${baseItem.id}?n_results=3&user_id=${userId}`;
-      } else if (actualCategory === 'outer') {
-        // 아우터 → 상의 or 하의 or 상의+하의 추천
-        url = `${API_BASE_URL}/api/recommendations/match-top-or-bottom-or-combo/${baseItem.id}?n_results=3&user_id=${userId}`;
-      } else if (actualCategory === 'dress') {
-        // 드레스 → 하의 or 아우터 추천
-        url = `${API_BASE_URL}/api/recommendations/match-bottom-or-outer-for-dress/${baseItem.id}?n_results=3&user_id=${userId}`;
-      }
-      
-      console.log(`\n✨ 추천 요청 URL: ${url}`);
-      
-      const response = await fetch(url);
-      
-      const contentType = response.headers.get('content-type');
-      if (response.status !== 200 || !contentType || !contentType.includes('application/json')) {
-        console.error(`❌ 추천 요청 실패: 상태 코드 ${response.status}`);
-        const errorText = await response.text();
-        console.error('서버 응답:', errorText.substring(0, 500));
-        Alert.alert('서버 오류', `추천을 받을 수 없습니다 (Status: ${response.status})`);
-        setRecommendations([]);
-        return;
-      }
-
-      const data = await response.json();
-
-      if (data.success && data.recommendations) {
-        // ✅ 이미지 URL 생성 + 디버깅
-        const recs: Rec[] = data.recommendations.map((rec: any, index: number) => {
-          const imageUrl = `${API_BASE_URL}/api/images/${rec.image_path}`;
+      if (response.ok) {
+        const responseData = await response.json();
+        console.log('✅ 고급 추천 데이터 로드 성공:', responseData);
+        
+        // 백엔드에서 {success: true, recommendations: [...]} 형태로 반환
+        const data = responseData.recommendations || [];
+        console.log('📦 추천 배열:', data, '길이:', data.length);
+        
+        if (!data || !Array.isArray(data)) {
+          console.log('⚠️ 추천 데이터가 배열이 아님, 빈 배열로 처리');
+          setRecommendations([]);
+          Alert.alert('추천 완료', '추천할 아이템을 찾을 수 없습니다.');
+          return;
+        }
+        
+        const recs = data.map((rec: any) => {
+          // 이미지 URL 생성 (기본 아이템과 사용자 아이템 구분)
+          let imageUrl = '';
+          if (rec.is_default) {
+            imageUrl = `${API_BASE_URL}/api/default-images/${rec.image_path}`;
+          } else {
+            // image_path가 item_xxx_full.jpg 형태인지 확인
+            if (rec.image_path && rec.image_path.startsWith('item_') && rec.image_path.includes('_full.jpg')) {
+              imageUrl = `${API_BASE_URL}/api/processed-images/user_${userId}/full/${rec.image_path}`;
+            } else {
+              // 원본 파일명인 경우 item_xxx_full.jpg 형태로 변환
+              imageUrl = `${API_BASE_URL}/api/processed-images/user_${userId}/full/item_${rec.id}_full.jpg`;
+            }
+          }
           
-          console.log(`\n📸 추천 아이템 ${index + 1}:`);
-          console.log(`  - ID: ${rec.id}`);
-          console.log(`  - image_path (from server): ${rec.image_path}`);
-          console.log(`  - imageUrl (generated): ${imageUrl}`);
-          console.log(`  - name: ${rec.name}`);
-          console.log(`  - category: ${rec.category}`);
+          console.log(`🖼️ 추천 아이템 ${rec.id} 이미지 URL:`, imageUrl, 'is_default:', rec.is_default);
           
           return {
             id: rec.id,
             image: imageUrl,
-            title: selectedPart === 'top'
-              ? `${baseItem.name}와 어울리는 하의/아우터`
-              : selectedPart === 'bottom'
-              ? `${baseItem.name}와 어울리는 상의/아우터+상의`
-              : selectedPart === 'outer'
-              ? `${baseItem.name}와 어울리는 상의/하의/상의+하의`
-              : `${baseItem.name}와 어울리는 하의/아우터`,
-            items: [rec.name, rec.category],
-            score: rec.distance ? Math.round((1.0 - rec.distance) * 100) : 80, 
-            reason: rec.distance ? `유사도 점수: ${(1.0 - rec.distance).toFixed(2)}` : '추천 점수: 80',
+            title: rec.name || `아이템 ${rec.id}`,
+            items: [],
+            score: Math.round(rec.score * 100),
+            reason: rec.explanation || 'AI 추천',
             is_default: rec.is_default || false,
+            detailed_scores: rec.detailed_scores,
+            explanation: rec.explanation,
           };
         });
         
-        // 기본 아이템 추천도 함께 추가 (중복 제거)
-        const combinedRecs = [...recs];
+        setRecommendations(recs);
         
-        // 기본 아이템 추천이 있으면 추가 (중복 ID 제거)
-        if (defaultRecommendations.length > 0) {
-          const defaultRecs = defaultRecommendations.map((item, index) => ({
-            id: item.id,
-            image: item.image,
-            title: item.name,
-            items: [item.name, item.category],
-            score: 80, // 기본 아이템은 80점
-            reason: '기본 추천 아이템',
-            is_default: true,
-          }));
+        // 상세한 추천 결과 메시지 생성
+        let detailMessage = '';
+        const selectedCategory = selectedPart;
+        
+        // 카테고리별 개수 계산
+        const categoryCounts = {
+          top: recs.filter(r => r.title.includes('상의') || r.title.includes('티셔츠') || r.title.includes('셔츠')).length,
+          bottom: recs.filter(r => r.title.includes('하의') || r.title.includes('바지') || r.title.includes('스커트')).length,
+          outer: recs.filter(r => r.title.includes('아우터') || r.title.includes('재킷') || r.title.includes('코트')).length,
+          dress: recs.filter(r => r.title.includes('드레스') || r.title.includes('원피스')).length,
+        };
+        
+        if (selectedCategory === 'top') {
+          const parts = [];
+          if (categoryCounts.bottom > 0) parts.push(`하의 ${categoryCounts.bottom}개`);
+          if (categoryCounts.outer > 0) parts.push(`아우터 ${categoryCounts.outer}개`);
+          if (categoryCounts.bottom > 0 && categoryCounts.outer > 0) parts.push(`하의+아우터 조합 ${Math.min(categoryCounts.bottom, categoryCounts.outer)}개`);
           
-          // 중복 ID 제거: 이미 있는 ID는 제외하고 추가
-          const existingIds = new Set(combinedRecs.map(r => r.id));
-          const uniqueDefaultRecs = defaultRecs.filter(r => !existingIds.has(r.id));
+          if (parts.length > 0) {
+            detailMessage = `상의와 어울리는 ${parts.join(', ')} 발견`;
+          } else {
+            detailMessage = `상의와 어울리는 아이템을 찾을 수 없습니다`;
+          }
+        } else if (selectedCategory === 'bottom') {
+          const parts = [];
+          if (categoryCounts.top > 0) parts.push(`상의 ${categoryCounts.top}개`);
+          if (categoryCounts.outer > 0) parts.push(`아우터 ${categoryCounts.outer}개`);
+          if (categoryCounts.top > 0 && categoryCounts.outer > 0) parts.push(`상의+아우터 조합 ${Math.min(categoryCounts.top, categoryCounts.outer)}개`);
           
-          combinedRecs.push(...uniqueDefaultRecs);
+          if (parts.length > 0) {
+            detailMessage = `하의와 어울리는 ${parts.join(', ')} 발견`;
+          } else {
+            detailMessage = `하의와 어울리는 아이템을 찾을 수 없습니다`;
+          }
+        } else if (selectedCategory === 'outer') {
+          const parts = [];
+          if (categoryCounts.top > 0) parts.push(`상의 ${categoryCounts.top}개`);
+          if (categoryCounts.bottom > 0) parts.push(`하의 ${categoryCounts.bottom}개`);
+          if (categoryCounts.top > 0 && categoryCounts.bottom > 0) parts.push(`상의+하의 조합 ${Math.min(categoryCounts.top, categoryCounts.bottom)}개`);
+          
+          if (parts.length > 0) {
+            detailMessage = `아우터와 어울리는 ${parts.join(', ')} 발견`;
+          } else {
+            detailMessage = `아우터와 어울리는 아이템을 찾을 수 없습니다`;
+          }
+        } else if (selectedCategory === 'dress') {
+          const parts = [];
+          if (categoryCounts.bottom > 0) parts.push(`하의 ${categoryCounts.bottom}개`);
+          if (categoryCounts.outer > 0) parts.push(`아우터 ${categoryCounts.outer}개`);
+          
+          if (parts.length > 0) {
+            detailMessage = `드레스와 어울리는 ${parts.join(', ')} 발견`;
+          } else {
+            detailMessage = `드레스와 어울리는 아이템을 찾을 수 없습니다`;
+          }
         }
         
-        setRecommendations(combinedRecs);
-        
-        const hasDefaultItems = combinedRecs.some(r => r.is_default);
-        const recommendType = '어울리는';
-        
-        if (hasDefaultItems) {
-          Alert.alert(
-            '추천 완료',
-            `${baseItem.name}와 ${recommendType} 아이템 ${combinedRecs.length}개를 찾았습니다.\n\n일부 기본 추천 아이템이 포함되었습니다.`
-          );
-        } else {
-          Alert.alert('추천 완료', `${baseItem.name}와 ${recommendType} 아이템 ${combinedRecs.length}개를 찾았습니다.`);
-        }
+        Alert.alert('추천 완료', detailMessage);
       } else {
-        Alert.alert('추천 실패', data.detail || '추천 목록을 가져오지 못했습니다.');
-        setRecommendations([]);
+        throw new Error(`HTTP ${response.status}`);
       }
     } catch (error) {
-      console.error('❌ 추천 네트워크 오류:', error);
+      console.error('❌ 추천 요청 실패:', error);
       Alert.alert('네트워크 오류', '추천 서버와 연결할 수 없습니다.');
     } finally {
       setRecommending(false);
     }
   };
 
-  // 💬 LLM 채팅 메시지 전송
+  // LLM 채팅 메시지 전송
   const sendChatMessage = async () => {
     if (!chatInput.trim() || !userId) return;
     
@@ -431,229 +555,414 @@ export default function DailyOutfitRecommendation({
             id: rec.id,
             name: rec.has_top 
               ? `${rec.top_color || ''} ${rec.top_category || ''}`.trim()
-              : `${rec.bottom_color || ''} ${rec.bottom_category || ''}`.trim(),
-            brand: 'AI 추천',
-            image: `${API_BASE_URL}${rec.image}`,
-            category: rec.has_top ? '상의' : '하의',
+              : rec.has_bottom 
+              ? `${rec.bottom_color || ''} ${rec.bottom_category || ''}`.trim()
+              : rec.has_outer
+              ? `${rec.outer_color || ''} ${rec.outer_category || ''}`.trim()
+              : rec.has_dress
+              ? `${rec.dress_color || ''} ${rec.dress_category || ''}`.trim()
+              : `아이템 ${rec.id}`,
+            brand: rec.brand || '브랜드 미상',
+            category: rec.has_top ? '상의' : rec.has_bottom ? '하의' : rec.has_outer ? '아우터' : rec.has_dress ? '드레스' : '기타',
+            color: rec.top_color || rec.bottom_color || rec.outer_color || rec.dress_color || '미상',
+            fit: rec.top_fit || rec.bottom_fit || rec.outer_fit || rec.dress_fit || '미상',
+            materials: rec.top_materials || rec.bottom_materials || rec.outer_materials || rec.dress_materials || [],
+            image: rec.image_path ? 
+              (rec.image_path.startsWith('item_') && rec.image_path.includes('_full.jpg') 
+                ? `${API_BASE_URL}/api/processed-images/user_${userId}/full/${rec.image_path}`
+                : `${API_BASE_URL}/api/processed-images/user_${userId}/full/item_${rec.id}_full.jpg`) 
+              : `${API_BASE_URL}/api/images/item_${rec.id}.jpg`,
+            top_category: rec.top_category,
+            bottom_category: rec.bottom_category,
+            outer_category: rec.outer_category,
+            dress_category: rec.dress_category,
+            top_image: rec.top_image_path,
+            bottom_image: rec.bottom_image_path,
+            outer_image: rec.outer_image_path,
+            dress_image: rec.dress_image_path,
+            has_top: rec.has_top,
+            has_bottom: rec.has_bottom,
+            has_outer: rec.has_outer,
+            has_dress: rec.has_dress,
             loved: false,
           }));
-          
           setChatRecommendations(items);
-          
-          // 추천이 완료되면 알림
-          if (!data.need_more_info) {
-            Alert.alert(
-              '추천 완료! 🎉',
-              `${items.length}개의 아이템을 추천해드렸습니다. 아래에서 확인하세요!`
-            );
-          }
         }
-        
-        console.log('✅ 채팅 응답:', data.response);
-        console.log('📦 컨텍스트:', data.context);
-        console.log('👕 추천 아이템:', data.recommendations?.length || 0);
       } else {
-        Alert.alert('오류', data.message || '메시지 전송에 실패했습니다.');
+        throw new Error(data.error || '알 수 없는 오류');
       }
     } catch (error) {
-      console.error('❌ 채팅 오류:', error);
-      Alert.alert('네트워크 오류', '서버와 연결할 수 없습니다.');
+      console.error('❌ LLM 채팅 실패:', error);
+      Alert.alert('오류', 'AI와의 대화 중 오류가 발생했습니다.');
     } finally {
       setChatLoading(false);
     }
   };
 
-  // 💬 채팅 초기화
-  const resetChat = async () => {
-    if (!userId) return;
-    
-    try {
-      const formData = new FormData();
-      formData.append('user_id', String(userId));
-      
-      const response = await fetch(`${API_BASE_URL}/api/chat/reset`, {
-        method: 'POST',
-        body: formData,
-      });
-      
-      const data = await response.json();
-      
-      if (data.success) {
-        setChatMessages([]);
-        setChatRecommendations([]);
-        Alert.alert('초기화 완료', '새로운 대화를 시작하세요!');
-      }
-    } catch (error) {
-      console.error('❌ 초기화 오류:', error);
-    }
-  };
-
-  // 🎯 기본 아이템 추천 가져오기
-  const fetchDefaultRecommendations = useCallback(async () => {
-    if (!userId) return;
-    
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/recommendations/default/${userId}`);
-      const data = await response.json();
-      
-      if (data.success && data.recommendations) {
-        const items: WardrobeItem[] = data.recommendations.map((rec: any) => ({
-          id: rec.id,
-          name: rec.name,
-          brand: 'AI 추천',
-          image: `${API_BASE_URL}/api/images/${rec.image_path}`,  // image_path 필드 사용
-          category: rec.category,
-          loved: false,
-          has_top: rec.has_top,
-          has_bottom: rec.has_bottom,
-          has_outer: rec.has_outer,
-          has_dress: rec.has_dress,
-        }));
-        
-        setDefaultRecommendations(items);
-        console.log(`✅ 기본 아이템 추천 ${items.length}개 로드 완료`);
-      }
-    } catch (error) {
-      console.error('❌ 기본 아이템 추천 로드 오류:', error);
-    }
-  }, [userId]);
-
-
-  useEffect(() => {
-    const loadUser = async () => {
-      try {
-        const userStr = await AsyncStorage.getItem('user');
-        if (userStr) {
-          const user = JSON.parse(userStr);
-          setUserId(user.user_id);
-          fetchWardrobe(user.user_id);
-          fetchDefaultRecommendations(); // 기본 아이템 추천 로드
-        } else {
-          Alert.alert('로그인 필요', '로그인이 필요합니다.');
-        }
-      } catch (error) {
-        console.error('❌ 사용자 정보 로드 실패:', error);
-      } finally {
-        setLoading(false); 
-      }
-    };
-    loadUser();
-  }, [fetchWardrobe]);
-  
-  async function onRefresh() {
-    await fetchRecommendation();
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.safe}>
+        <AppHeader title="AI 코디 분석" onBack={onBack} />
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#111" />
+          <Text style={styles.loadingText}>데이터를 불러오는 중...</Text>
+        </View>
+        <BottomNavBar activeScreen="style-analysis" onNavigate={onNavigate} />
+      </SafeAreaView>
+    );
   }
-
-  const handleNavigation = (screen: string) => {
-    console.log('========================================');
-    console.log('📢 네비게이션 클릭!');
-    console.log('전달받은 screen 값:', screen);
-    console.log('screen 타입:', typeof screen);
-    console.log('========================================');
-    
-    onNavigate(screen as NavigationStep);
-  };
-
-// ✅ HeaderRightAction 수정 (line ~260 근처)
-  const HeaderRightAction = (
-    <View style={{ flexDirection: 'row', gap: 8 }}>
-      {/* 👇 채팅 버튼 추가 */}
-      <Pressable 
-        onPress={() => setShowChat(!showChat)} 
-        style={[styles.chatToggleBtn, showChat && styles.chatToggleBtnActive]}
-      >
-        {showChat ? <X size={16} color="#FFF" /> : <MessageCircle size={16} color="#FFF" />}
-      </Pressable>
-      
-      {/* 기존 AI 추천 버튼 */}
-      <Pressable 
-        onPress={onRefresh} 
-        style={[styles.refreshBtn, (loading || recommending || !baseItem) && styles.refreshBtnDisabled]} 
-        disabled={loading || recommending || !baseItem}
-      >
-        {(loading || recommending) ? <ActivityIndicator color="#FFF" size="small" /> : <Zap size={16} color="#FFF" />}
-        <Text style={styles.refreshText}>{(loading || recommending) ? '처리중...' : 'AI 추천'}</Text>
-      </Pressable>
-    </View>
-  );
 
   return (
     <SafeAreaView style={styles.safe}>
-      <AppHeader
-        title="AI 코디 분석"
-        subtitle="옷장 기반 유사 아이템 추천"
+      <AppHeader 
+        title="AI 코디 분석" 
         onBack={onBack}
-        rightAction={HeaderRightAction}
+        rightComponent={
+          <Pressable 
+            onPress={() => setShowChat(!showChat)} 
+            style={[styles.chatToggleBtn, showChat && styles.chatToggleBtnActive]}
+          >
+            {showChat ? <X size={16} color="#FFF" /> : <MessageCircle size={16} color="#FFF" />}
+          </Pressable>
+        }
       />
-
-      {(loading || recommending) && (
-        <View style={styles.overlay}>
-          <ActivityIndicator size="large" color="#FFF" />
-          <Text style={styles.overlayText}>
-            {loading ? '데이터 로딩 중...' : 'AI가 추천을 생성하는 중...'}
-          </Text>
+      
+      <ScrollView 
+        style={styles.container}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* 날씨 정보 */}
+        <View style={styles.weatherCard}>
+          <View style={styles.weatherHeader}>
+            <View style={styles.weatherInfo}>
+              <Text style={styles.weatherDate}>{weather.date}</Text>
+              <Text style={styles.weatherTemp}>{weather.temperature}°C</Text>
+            </View>
+            <View style={styles.weatherIcon}>
+              <Text style={{ fontSize: 24 }}>{weather.icon}</Text>
+            </View>
+          </View>
+          <Text style={styles.weatherDesc}>{weather.styleTip}</Text>
         </View>
-      )}
 
-      {/* 👇 채팅 모달 추가 */}
-      {showChat && (
-        <KeyboardAvoidingView 
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.chatModal}
-        >
-          <View style={styles.chatContainer}>
-            {/* 채팅 헤더 */}
-            <View style={styles.chatHeader}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                <MessageCircle size={20} color="#111" />
-                <Text style={styles.chatHeaderTitle}>AI 스타일리스트와 대화</Text>
+        {/* 추천 기준 아이템 선택 */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>추천 기준 아이템 선택</Text>
+          {(() => {
+            const userItems = wardrobeItems.filter(item => !item.is_default);
+            console.log('🔍 디버깅 - 전체 아이템 수:', wardrobeItems.length);
+            console.log('🔍 디버깅 - 사용자 아이템 수:', userItems.length);
+            console.log('🔍 디버깅 - 전체 아이템:', wardrobeItems.map(item => ({ id: item.id, is_default: item.is_default })));
+            return userItems.length === 0;
+          })() ? (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyText}>옷장에 아이템이 없습니다.</Text>
+              <Text style={styles.emptySubtext}>옷장 탭에서 아이템을 추가해보세요.</Text>
+            </View>
+          ) : (
+            <ScrollView 
+              horizontal 
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.itemScrollContent}
+              style={styles.itemScroll}
+            >
+              {wardrobeItems.filter(item => !item.is_default).map((item) => (
+              <Pressable
+                key={item.id}
+                onPress={() => {
+                  setBaseItemId(item.id);
+                  // 아이템의 실제 카테고리에 따라 selectedPart 자동 설정
+                  if (item.has_dress) setSelectedPart('dress');
+                  else if (item.has_outer) setSelectedPart('outer');
+                  else if (item.has_top) setSelectedPart('top');
+                  else if (item.has_bottom) setSelectedPart('bottom');
+                }}
+                style={[
+                  styles.itemCard,
+                  baseItemId === item.id && styles.itemCardActive
+                ]}
+              >
+                <Image 
+                  source={{ uri: item.image }} 
+                  style={styles.itemImage}
+                  onError={(error) => {
+                    console.log('❌ 이미지 로드 실패:', item.image, error.nativeEvent.error);
+                  }}
+                  onLoad={() => {
+                    console.log('✅ 이미지 로드 성공:', item.image);
+                  }}
+                />
+                <Text style={styles.itemName} numberOfLines={2}>
+                  {item.name}
+                </Text>
+              </Pressable>
+              ))}
+            </ScrollView>
+          )}
+        </View>
+
+        {/* 추천 방식 선택 */}
+        {baseItem && !baseItem.is_default && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>추천 방식 선택</Text>
+            <Text style={styles.sectionSubtitle}>
+              {baseItem.has_dress 
+                ? "이 드레스와 어울리는 하의 or 아우터 추천"
+                : baseItem.has_outer
+                ? "이 아우터와 어울리는 상의 or 하의 or 상의+하의 추천"
+                : baseItem.has_top
+                ? "이 상의와 어울리는 하의 or 아우터 추천"
+                : baseItem.has_bottom
+                ? "이 하의와 어울리는 상의 or 아우터+상의 추천"
+                : "추천 방식을 선택해주세요"
+              }
+            </Text>
+            
+            <View style={styles.partSelector}>
+              {baseItem.has_top && (
+                <Pressable
+                  onPress={() => setSelectedPart('top')}
+                  style={[
+                    styles.partCard,
+                    selectedPart === 'top' && styles.partCardActive
+                  ]}
+                >
+                  <Text style={[styles.partText, selectedPart === 'top' && styles.partTextActive]}>
+                    👕 상의
+                  </Text>
+                  <Image 
+                    source={{ uri: baseItem.top_image || baseItem.image }} 
+                    style={styles.partImage}
+                    onError={(error) => {
+                      console.log('❌ 상의 이미지 로드 실패:', baseItem.top_image || baseItem.image);
+                    }}
+                    onLoad={() => {
+                      console.log('✅ 상의 이미지 로드 성공:', baseItem.top_image || baseItem.image);
+                    }}
+                  />
+                </Pressable>
+              )}
+              
+              {baseItem.has_bottom && (
+                <Pressable
+                  onPress={() => setSelectedPart('bottom')}
+                  style={[
+                    styles.partCard,
+                    selectedPart === 'bottom' && styles.partCardActive
+                  ]}
+                >
+                  <Text style={[styles.partText, selectedPart === 'bottom' && styles.partTextActive]}>
+                    👖 하의
+                  </Text>
+                  <Image 
+                    source={{ uri: baseItem.bottom_image || baseItem.image }} 
+                    style={styles.partImage}
+                    onError={(error) => {
+                      console.log('❌ 하의 이미지 로드 실패:', baseItem.bottom_image || baseItem.image);
+                    }}
+                    onLoad={() => {
+                      console.log('✅ 하의 이미지 로드 성공:', baseItem.bottom_image || baseItem.image);
+                    }}
+                  />
+                </Pressable>
+              )}
+              
+              {baseItem.has_outer && (
+                <Pressable
+                  onPress={() => setSelectedPart('outer')}
+                  style={[
+                    styles.partCard,
+                    selectedPart === 'outer' && styles.partCardActive
+                  ]}
+                >
+                  <Text style={[styles.partText, selectedPart === 'outer' && styles.partTextActive]}>
+                    🧥 아우터
+                  </Text>
+                  <Image source={{ uri: baseItem.outer_image || baseItem.image }} style={styles.partImage} />
+                </Pressable>
+              )}
+              
+              {baseItem.has_dress && (
+                <Pressable
+                  onPress={() => setSelectedPart('dress')}
+                  style={[
+                    styles.partCard,
+                    selectedPart === 'dress' && styles.partCardActive
+                  ]}
+                >
+                  <Text style={[styles.partText, selectedPart === 'dress' && styles.partTextActive]}>
+                    👗{' '}드레스
+                  </Text>
+                  <Image 
+                    source={{ uri: baseItem.dress_image || baseItem.image }} 
+                    style={styles.partImage}
+                    onError={(error) => {
+                      console.log('❌ 드레스 이미지 로드 실패:', baseItem.dress_image || baseItem.image);
+                    }}
+                    onLoad={() => {
+                      console.log('✅ 드레스 이미지 로드 성공:', baseItem.dress_image || baseItem.image);
+                    }}
+                  />
+                </Pressable>
+              )}
+            </View>
+          </View>
+        )}
+
+        {/* AI 추천 버튼 */}
+        {baseItem && !baseItem.is_default && (
+        <View style={styles.section}>
+          <Pressable
+            onPress={fetchRecommendation}
+            disabled={!baseItem || recommending}
+            style={[styles.recommendBtn, (!baseItem || recommending) && styles.recommendBtnDisabled]}
+          >
+            {recommending ? (
+              <ActivityIndicator size="small" color="#FFF" />
+            ) : (
+              <>
+                <Zap size={20} color="#FFF" />
+                <Text style={styles.recommendBtnText}>AI 추천</Text>
+              </>
+            )}
+          </Pressable>
+        </View>
+        )}
+
+        {/* 추천 결과 */}
+        {recommendations.length > 0 && (
+          <View style={styles.section}>
+            <View style={styles.resultHeader}>
+              <Text style={styles.sectionTitle}>추천 결과</Text>
+              <View style={styles.scoreBadge}>
+                <Text style={styles.scoreText}>평균 {avgScore}점</Text>
               </View>
-              <Pressable onPress={resetChat}>
-                <Text style={styles.chatResetBtn}>초기화</Text>
+            </View>
+            
+            <View style={styles.recommendationsGrid}>
+              {recommendations.map((rec, index) => (
+                <Pressable key={`${rec.id}-${index}-${rec.is_default ? 'default' : 'user'}`} style={styles.recommendationCard}>
+                  <Image 
+                    source={{ uri: rec.image }} 
+                    style={styles.recommendationImage}
+                    onError={(error) => {
+                      console.log('❌ 추천 아이템 이미지 로드 실패:', rec.image, error.nativeEvent.error);
+                    }}
+                    onLoad={() => {
+                      console.log('✅ 추천 아이템 이미지 로드 성공:', rec.image);
+                    }}
+                  />
+                  <View style={styles.recommendationInfo}>
+                    <Text style={styles.recommendationTitle} numberOfLines={2}>
+                      {rec.title}
+                    </Text>
+                    <View style={styles.recommendationMeta}>
+                      <Text style={styles.recommendationScore}>{rec.score}점</Text>
+                      {rec.is_default && (
+                        <View style={styles.defaultBadge}>
+                          <Text style={styles.defaultBadgeText}>기본 추천</Text>
+                        </View>
+                      )}
+                    </View>
+                    {rec.detailed_scores && (
+                      <View style={styles.detailedScores}>
+                        <Text style={styles.scoreLabel}>색상: {Math.round(rec.detailed_scores.color_harmony * 100)}</Text>
+                        <Text style={styles.scoreLabel}>소재: {Math.round(rec.detailed_scores.material_combination * 100)}</Text>
+                        <Text style={styles.scoreLabel}>핏: {Math.round(rec.detailed_scores.fit_combination * 100)}</Text>
+                        <Text style={styles.scoreLabel}>스타일: {Math.round(rec.detailed_scores.style_combination * 100)}</Text>
+                        <Text style={styles.scoreLabel}>계절: {Math.round(rec.detailed_scores.seasonal_suitability * 100)}</Text>
+                      </View>
+                    )}
+                    {rec.explanation && (
+                      <Text style={styles.explanationText} numberOfLines={2}>
+                        {rec.explanation}
+                      </Text>
+                    )}
+                  </View>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+        )}
+      </ScrollView>
+
+      {/* LLM 채팅 모달 */}
+      {showChat && (
+        <View style={styles.chatModal}>
+          <View style={styles.chatContainer}>
+            <View style={styles.chatHeader}>
+              <Text style={styles.chatTitle}>AI 스타일리스트</Text>
+              <Pressable onPress={() => setShowChat(false)}>
+                <X size={24} color="#6B7280" />
               </Pressable>
             </View>
-
-            {/* 채팅 메시지 */}
+            
             <ScrollView 
               style={styles.chatMessages}
-              contentContainerStyle={{ padding: 12, gap: 12 }}
+              contentContainerStyle={styles.chatMessagesContent}
             >
               {chatMessages.length === 0 ? (
-                <View style={styles.chatEmptyState}>
-                  <Text style={styles.chatEmptyText}>
-                    안녕하세요! 😊{'\n\n'}
-                    오늘 어떤 옷을 입을지 고민이시라면{'\n'}
-                    편하게 물어보세요!{'\n\n'}
-                    예: "오늘 회사 가는데 좀 추워요"
+                <View style={styles.welcomeMessage}>
+                  <Text style={styles.welcomeText}>
+                    안녕하세요! 저는 당신의 패션 스타일리스트 AI입니다. 
+                    어떤 스타일링을 도와드릴까요?
                   </Text>
                 </View>
               ) : (
                 chatMessages.map((msg, index) => (
-                  <View 
+                  <View
                     key={index}
                     style={[
-                      styles.chatBubble,
-                      msg.role === 'user' ? styles.chatBubbleUser : styles.chatBubbleAI
+                      styles.messageContainer,
+                      msg.role === 'user' ? styles.userMessage : styles.assistantMessage,
                     ]}
                   >
                     <Text style={[
-                      styles.chatBubbleText,
-                      msg.role === 'user' && styles.chatBubbleTextUser
+                      styles.messageText,
+                      msg.role === 'user' ? styles.userMessageText : styles.assistantMessageText,
                     ]}>
                       {msg.content}
+                    </Text>
+                    <Text style={styles.messageTime}>
+                      {msg.timestamp.toLocaleTimeString('ko-KR', { 
+                        hour: '2-digit', 
+                        minute: '2-digit' 
+                      })}
                     </Text>
                   </View>
                 ))
               )}
               
               {chatLoading && (
-                <View style={[styles.chatBubble, styles.chatBubbleAI]}>
-                  <ActivityIndicator size="small" color="#666" />
+                <View style={[styles.messageContainer, styles.assistantMessage]}>
+                  <ActivityIndicator size="small" color="#6B7280" />
+                  <Text style={[styles.messageText, styles.assistantMessageText, { marginLeft: 8 }]}>
+                    AI가 답변을 준비 중입니다...
+                  </Text>
                 </View>
               )}
             </ScrollView>
 
-            {/* 채팅 입력창 */}
+            {/* 채팅 추천 아이템 */}
+            {chatRecommendations.length > 0 && (
+              <View style={styles.recommendationsContainer}>
+                <Text style={styles.recommendationsTitle}>추천 아이템</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                  <View style={styles.recommendationsList}>
+                    {chatRecommendations.map((item) => (
+                      <Pressable key={item.id} style={styles.recommendationCard}>
+                        <Image source={{ uri: item.image }} style={styles.recommendationImage} />
+                        <Text style={styles.recommendationName} numberOfLines={2}>
+                          {item.name}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                </ScrollView>
+              </View>
+            )}
+
             <View style={styles.chatInputContainer}>
               <TextInput
                 style={styles.chatInput}
@@ -672,541 +981,119 @@ export default function DailyOutfitRecommendation({
               </Pressable>
             </View>
           </View>
-        </KeyboardAvoidingView>
+        </View>
       )}
 
-
-      <ScrollView contentContainerStyle={styles.screenPad}>
-        
-        {/* A. 현재 날씨 카드 */}
-        <View style={styles.weatherCard}>
-          <View style={styles.weatherLeft}>
-            <View style={styles.weatherIcon}>
-              <Cloud size={24} color="#FFF" />
-            </View>
-            <View>
-              <Text style={styles.weatherTitle}>오늘의 날씨 (임시)</Text>
-              <View style={styles.weatherRow}>
-                <View style={styles.inlineRow}>
-                  <Calendar size={12} color="#374151" />
-                  <Text style={styles.weatherMeta}>{todayStr}</Text>
-                </View>
-                <View style={styles.inlineRow}>
-                  <MapPin size={12} color="#374151" />
-                  <Text style={styles.weatherMeta}>서울 (임시)</Text>
-                </View>
-              </View>
-            </View>
-          </View>
-          <View>
-            <Text style={styles.weatherMain}>18°C / 23°C</Text>
-            <Text style={styles.weatherSub}>약간 흐림, 겉옷 추천</Text>
-          </View>
-        </View>
-
-        {/* B. 기준 아이템 선택 섹션 */}
-        <View>
-            <Text style={styles.sectionTitle}>추천 기준 아이템 선택</Text>
-            {wardrobeItems.length === 0 ? (
-                <View style={[styles.emptyArea, {paddingVertical: 10}]}>
-                    <Text style={styles.emptyText}>옷장에 아이템이 없습니다. 등록해주세요.</Text>
-                </View>
-            ) : (
-                <>
-                    <View style={styles.baseItemInfo}>
-                        <Text style={styles.baseItemText}>
-                            현재 기준: <Text style={{fontWeight: 'bold', color: '#111'}}>{baseItem?.name || '선택 필요'}</Text> ({baseItem?.category || '-'})
-                        </Text>
-                    </View>
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.baseItemScroll}>
-                        {wardrobeItems.map((item, index) => (
-                            <Pressable 
-                                key={`${item.id}-${index}`} 
-                                onPress={() => { 
-                                    setBaseItemId(item.id); 
-                                    setRecommendations([]);
-                                    
-                                    // ✅ 아이템 선택 시 자동으로 추천 방식 설정
-                                    let newSelectedPart = '';
-                                    if (item.has_dress) {
-                                        newSelectedPart = 'dress';
-                                    } else if (item.has_outer) {
-                                        newSelectedPart = 'outer';
-                                    } else if (item.has_top) {
-                                        newSelectedPart = 'top';
-                                    } else if (item.has_bottom) {
-                                        newSelectedPart = 'bottom';
-                                    }
-                                    
-                                    if (newSelectedPart) {
-                                        console.log(`🎯 아이템 ${item.id} 선택으로 추천 방식 설정: ${newSelectedPart}`);
-                                        setSelectedPart(newSelectedPart);
-                                    }
-                                }} 
-                                style={[styles.baseItemCard, item.id === baseItemId && styles.baseItemCardActive]}
-                                disabled={loading || recommending}
-                            >
-                                <Image source={{ uri: item.image }} style={styles.baseItemImg} />
-                                <View style={styles.baseItemOverlay}>
-                                    <Text style={styles.baseItemCardText}>{item.name}</Text>
-                                </View>
-                            </Pressable>
-                        ))}
-                    </ScrollView>
-                </>
-            )}
-        </View>
-
-        {/* C. 추천 방식 선택 */}
-        {baseItem && (baseItem.has_top || baseItem.has_bottom || baseItem.has_outer || baseItem.has_dress) && (
-          <View>
-            <Text style={styles.sectionTitle}>추천 방식 선택</Text>
-            <Text style={styles.sectionSubtitle}>
-              {baseItem.has_dress ? '이 드레스와 어울리는 하의 or 아우터 추천' :
-              baseItem.has_outer ? '이 아우터와 어울리는 상의 or 하의 or 상의+하의 추천' :
-              baseItem.has_top ? '이 상의와 어울리는 하의 or 아우터 추천' :
-              baseItem.has_bottom ? '이 하의와 어울리는 상의 or 아우터+상의 추천' :
-              '추천할 수 있는 아이템이 없습니다'}
-            </Text>
-            
-            <View style={styles.partSelector}>
-              {baseItem.has_top && baseItem.top_image && (
-                <Pressable 
-                  style={[
-                    styles.partCard,
-                    selectedPart === 'top' && styles.partCardActive
-                  ]}
-                  onPress={() => {
-                    setSelectedPart('top');
-                    setRecommendations([]);
-                  }}
-                  disabled={loading || recommending}
-                >
-                  <Image source={{ uri: baseItem.top_image }} style={styles.partImage} />
-                  <Text style={[
-                    styles.partText,
-                    selectedPart === 'top' && styles.partTextActive
-                  ]}>
-                    👕 상의
-                  </Text>
-                </Pressable>
-              )}
-              
-              {baseItem.has_bottom && baseItem.bottom_image && (
-                <Pressable 
-                  style={[
-                    styles.partCard,
-                    selectedPart === 'bottom' && styles.partCardActive
-                  ]}
-                  onPress={() => {
-                    setSelectedPart('bottom');
-                    setRecommendations([]);
-                  }}
-                  disabled={loading || recommending}
-                >
-                  <Image source={{ uri: baseItem.bottom_image }} style={styles.partImage} />
-                  <Text style={[
-                    styles.partText,
-                    selectedPart === 'bottom' && styles.partTextActive
-                  ]}>
-                    👖 하의
-                  </Text>
-                </Pressable>
-              )}
-
-              {baseItem.has_outer && baseItem.outer_image && (
-                <Pressable 
-                  style={[
-                    styles.partCard,
-                    selectedPart === 'outer' && styles.partCardActive
-                  ]}
-                  onPress={() => {
-                    setSelectedPart('outer');
-                    setRecommendations([]);
-                  }}
-                  disabled={loading || recommending}
-                >
-                  <Image source={{ uri: baseItem.outer_image }} style={styles.partImage} />
-                  <Text style={[
-                    styles.partText,
-                    selectedPart === 'outer' && styles.partTextActive
-                  ]}>
-                    🧥 아우터
-                  </Text>
-                </Pressable>
-              )}
-
-              {baseItem.has_dress && baseItem.dress_image && (
-                <Pressable 
-                  style={[
-                    styles.partCard,
-                    selectedPart === 'dress' && styles.partCardActive
-                  ]}
-                  onPress={() => {
-                    setSelectedPart('dress');
-                    setRecommendations([]);
-                  }}
-                  disabled={loading || recommending}
-                >
-                  <Image source={{ uri: baseItem.dress_image }} style={styles.partImage} />
-                  <Text style={[
-                    styles.partText,
-                    selectedPart === 'dress' && styles.partTextActive
-                  ]}>
-                    👗 드레스
-                  </Text>
-                </Pressable>
-              )}
-            </View>
-          </View>
-        )}
-        
-
-
-        {/* 👇 채팅 추천 결과 섹션 추가 (E. 추천 결과 목록 위에) */}
-        {chatRecommendations.length > 0 && (
-          <View>
-            <Text style={styles.sectionTitle}>💬 대화 기반 AI 추천</Text>
-            <View style={{ gap: 16, marginTop: 16 }}>
-              {chatRecommendations.map((item, index) => (
-                <View key={`${item.id}-${index}`} style={styles.cardRow}>
-                  <View style={styles.thumbBig}>
-                    <Image 
-                      source={{ uri: item.image }} 
-                      style={[styles.thumbImg, { width: 96, height: 140 }]}
-                      resizeMode="cover"
-                    />
-                    <View style={styles.bestBadge}>
-                      <Text style={styles.bestBadgeText}>
-                        {index === 0 ? 'BEST' : `No.${index + 1}`}
-                      </Text>
-                    </View>
-                  </View>
-                  <View style={{ flex: 1, padding: 12, justifyContent: 'space-between' }}>
-                    <View>
-                      <Text style={styles.cardTitle}>{item.name}</Text>
-                      <Text style={styles.reason}>대화를 통해 추천된 아이템입니다</Text>
-                    </View>
-                    <Pressable style={[styles.btn, styles.btnPrimary]}>
-                      <Text style={styles.btnPrimaryText}>코디 보기</Text>
-                    </Pressable>
-                  </View>
-                </View>
-              ))}
-            </View>
-          </View>
-        )}
-
-        {/* E. 추천 결과 목록 */}
-        <View>
-          <View style={styles.rowBetween}>
-            <Text style={styles.sectionTitle}>
-                {recommendations.length > 0 ? 'AI 추천 결과' : 'AI 추천을 시작해주세요'}
-            </Text>
-            {recommendations.length > 0 && (
-              <View style={styles.rowCenter}>
-                <View style={styles.badgeSoftGreen}>
-                  <Text style={styles.badgeSoftGreenText}>평균 점수 {avgScore}</Text>
-                </View>
-              </View>
-            )}
-          </View>
-          
-          {wardrobeItems.length === 0 ? (
-            <View style={styles.emptyArea}>
-                <Text style={styles.emptyText}>아이템이 없어서 추천을 할 수 없습니다.</Text>
-            </View>
-          ) : recommendations.length === 0 && !recommending ? (
-             <View style={styles.emptyArea}>
-                <Text style={styles.emptyText}>기준 아이템을 선택하고 'AI 추천' 버튼을 눌러보세요.</Text>
-            </View>
-          ) : (
-            <View style={{ gap: 16, marginTop: 16 }}>
-              {recommendations.map((rec, index) => (
-                <View key={`${rec.id}-${index}-${rec.is_default ? 'default' : 'user'}`} style={styles.cardRow}>
-                  <View style={styles.thumbBig}>
-                    <Image 
-                      source={{ uri: rec.image }} 
-                      style={[styles.thumbImg, { width: 96, height: 140 }]}  // ✅ 명시적 크기 추가
-                      resizeMode="cover"
-                      onError={(e) => {
-                        console.error('❌ 이미지 로드 실패:', rec.image);
-                        console.error('에러:', e.nativeEvent.error);
-                        console.error('추천 아이템 전체 데이터:', JSON.stringify(rec, null, 2));
-                      }}
-                      onLoad={() => {
-                        console.log('✅ 이미지 로드 성공:', rec.image);
-                      }}
-                    />
-                    {/* 이미지 로드 실패 시 표시할 텍스트 */}
-                    <View style={styles.imageLoadingOverlay}>
-                      <Text style={styles.imageLoadingText}>📸</Text>
-                    </View>
-                    <View style={styles.bestBadge}>
-                        <Text style={styles.bestBadgeText}>
-                            {rec.is_default ? '기본 추천' : (index === 0 ? 'BEST MATCH' : `No.${index + 1}`)}
-                        </Text>
-                    </View>
-                  </View>
-                  <View style={{ flex: 1, padding: 12, justifyContent: 'space-between' }}>
-                    <View>
-                      <Text style={styles.cardTitle}>{rec.title}</Text>
-                      <Text style={[styles.scoreText, { marginTop: 4 }]}>
-                        {rec.score}점 매칭
-                      </Text>
-                      <Text style={styles.reason}>{rec.reason}</Text>
-                      <View style={{ height: 1, backgroundColor: '#F3F4F6', marginVertical: 8 }} />
-                      <View style={styles.tagWrap}>
-                        {rec.items.map((item, i) => (
-                          <View key={i} style={styles.tag}>
-                            <Text style={styles.tagText}>{item}</Text>
-                          </View>
-                        ))}
-                      </View>
-                    </View>
-                    <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
-                      <Pressable style={[styles.btn, styles.btnPrimary]}>
-                        <Text style={styles.btnPrimaryText}>코디 보기</Text>
-                      </Pressable>
-                      <Pressable style={[styles.btn, styles.btnOutline]}>
-                        <Text style={styles.btnOutlineText}>내 옷으로 대체</Text>
-                      </Pressable>
-                    </View>
-                  </View>
-                </View>
-              ))}
-            </View>
-          )}
-        </View>
-      </ScrollView>
-
-      <BottomNavBar 
-        activeScreen="style-analysis"
-        onNavigate={handleNavigation} 
-      />
+      <BottomNavBar activeScreen="style-analysis" onNavigate={onNavigate} />
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#FFFFFF' },
-  overlay: {
-    ...StyleSheet.absoluteFillObject,
-    top: APP_HEADER_HEIGHT,
-    bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.4)',
-    zIndex: 99, 
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  overlayText: {
-    color: '#FFF',
-    marginTop: 10,
-    fontWeight: 'bold',
-  },
-  refreshBtn: {
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    backgroundColor: '#111111',
-    borderRadius: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  refreshBtnDisabled: { opacity: 0.5 },
-  refreshText: { color: '#FFFFFF', fontSize: 12, fontWeight: '600' },
-  screenPad: { 
-    padding: 16, 
-    gap: 24, 
-    paddingBottom: 80, 
-    minHeight: '100%',
-    position: 'relative'
-  },
-  
-  baseItemInfo: { 
-      backgroundColor: '#F3F4F6', 
-      padding: 12, 
-      borderRadius: 8, 
-      marginBottom: 10 
-  },
-  baseItemText: { 
-      fontSize: 13, 
-      color: '#4B5563', 
-  },
-  baseItemScroll: { 
-      flexDirection: 'row',
-      marginHorizontal: -16, 
-      paddingHorizontal: 16
-  },
-  baseItemCard: {
-      width: 80,
-      height: 110,
-      borderRadius: 8,
-      marginRight: 8,
-      overflow: 'hidden',
-      borderWidth: 2,
-      borderColor: 'transparent',
-  },
-  baseItemCardActive: {
-      borderColor: '#111',
-  },
-  baseItemImg: {
-      ...StyleSheet.absoluteFillObject,
-      width: '100%',
-      height: '100%',
-  },
-  baseItemOverlay: {
-      ...StyleSheet.absoluteFillObject,
-      backgroundColor: 'rgba(0,0,0,0.2)',
-      justifyContent: 'flex-end',
-      padding: 4,
-  },
-  baseItemCardText: {
-      color: '#FFF',
-      fontSize: 10,
-      fontWeight: '600',
-  },
-  
-  loadingArea: { paddingVertical: 40, alignItems: 'center' },
-  loadingText: { marginTop: 16, color: '#666' },
-  emptyArea: { paddingVertical: 20, alignItems: 'center' },
-  emptyText: { fontSize: 16, color: '#9CA3AF', marginBottom: 8, textAlign: 'center' },
-  
-  weatherCard: {
+  safe: {
+    flex: 1,
     backgroundColor: '#F9FAFB',
-    padding: 16,
+  },
+  container: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingHorizontal: 16,
+    paddingBottom: 100,
+  },
+  loadingContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  loadingText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: '#6B7280',
+  },
+  weatherCard: {
+    backgroundColor: '#FFF',
     borderRadius: 12,
+    padding: 16,
+    marginTop: 16,
     borderWidth: 1,
-    borderColor: '#F3F4F6',
+    borderColor: '#E5E7EB',
+  },
+  weatherHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    marginBottom: 8,
   },
-  weatherLeft: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  weatherInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  weatherDate: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#111',
+  },
+  weatherTemp: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#111',
+  },
   weatherIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#3B82F6',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  weatherTitle: { fontSize: 14, fontWeight: '600', color: '#111827' },
-  weatherRow: { flexDirection: 'row', gap: 10, marginTop: 4, flexWrap: 'wrap' },
-  inlineRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  weatherMeta: { fontSize: 12, color: '#374151' },
-  weatherMain: { fontSize: 16, fontWeight: '600', color: '#111827', textAlign: 'right' },
-  weatherSub: { fontSize: 12, color: '#6B7280' },
-  sectionTitle: { fontSize: 16, fontWeight: '600', color: '#0B0B0B' },
-  occGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
-  },
-  occBtn: {
-    flex: 1,
-    minWidth: '30%',
-    paddingVertical: 12,
-    alignItems: 'center',
-    borderRadius: 8,
-    borderWidth: 1,
-    gap: 6,
-  },
-  occBtnDisabled: {
-      opacity: 0.5
-  },
-  occIdle: { backgroundColor: '#FFFFFF', borderColor: '#E5E7EB' },
-  occActive: { backgroundColor: '#111111', borderColor: '#111111' },
-  occEmoji: { fontSize: 20 },
-  occText: { fontSize: 13, color: '#111' },
-  occTextActive: { color: '#FFF', fontWeight: '600' },
-  rowBetween: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  rowCenter: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  badgeSoftGreen: {
-    backgroundColor: '#DCFCE7',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 999,
-  },
-  badgeSoftGreenText: { color: '#166534', fontSize: 12, fontWeight: '600' },
-  cardRow: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 10,
-    overflow: 'hidden',
-    flexDirection: 'row',
-    minHeight: 140,  // ✅ 최소 높이 추가
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOpacity: 0.06,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 4 },
-    borderWidth: 1.5,
-    borderColor: '#F3F4F6'
-  },
-  thumbBig: { 
-    width: 96, 
-    height: 140,  // ✅ 'auto'에서 고정 높이로 변경
-    backgroundColor: '#EEE',
-    overflow: 'hidden',
-  },
-  thumbImg: { 
-    width: '100%', 
-    height: '100%', 
-    resizeMode: 'cover' 
-  },
-  imageLoadingOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    padding: 8,
     backgroundColor: '#F3F4F6',
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: -1,
-  },
-  imageLoadingText: {
-    fontSize: 32,
-    opacity: 0.3,
-  },
-  bestBadge: {
-    position: 'absolute',
-    top: 6,
-    left: 6,
-    backgroundColor: '#111',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
-  bestBadgeText: { color: '#FFF', fontSize: 10, fontWeight: '700' },
-  cardTitle: { fontSize: 14, fontWeight: '600', color: '#111827' },
-  dot: { width: 8, height: 8, borderRadius: 4 },
-  scoreText: { fontSize: 12, color: '#111827', fontWeight: '600' },
-  tagWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  tag: {
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    backgroundColor: '#F9FAFB',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 6,
-  },
-  tagText: { fontSize: 11, color: '#4B5563' },
-  reason: { fontSize: 12, color: '#6B7280' },
-  btn: {
-    paddingVertical: 10,
-    paddingHorizontal: 12,
     borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flex: 1,
   },
-  btnPrimary: { backgroundColor: '#111' },
-  btnPrimaryText: { color: '#FFF', fontSize: 13, fontWeight: '600' },
-  btnOutline: { backgroundColor: '#FFF', borderWidth: 1, borderColor: '#E5E7EB' },
-  btnOutlineText: { color: '#111', fontSize: 13, fontWeight: '600' },
-
+  weatherDesc: {
+    fontSize: 14,
+    color: '#6B7280',
+  },
+  section: {
+    marginTop: 24,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#111',
+  },
   sectionSubtitle: {
     fontSize: 13,
     color: '#6B7280',
     marginTop: 4,
     marginBottom: 12,
+  },
+  itemScroll: {
+    marginTop: 12,
+  },
+  itemScrollContent: {
+    paddingRight: 16,
+  },
+  itemCard: {
+    width: 100,
+    marginRight: 12,
+    backgroundColor: '#FFF',
+    borderRadius: 8,
+    padding: 8,
+    borderWidth: 2,
+    borderColor: '#E5E7EB',
+  },
+  itemCardActive: {
+    borderColor: '#111',
+    backgroundColor: '#F9FAFB',
+  },
+  itemImage: {
+    width: 84,
+    height: 100,
+    borderRadius: 6,
+    backgroundColor: '#F3F4F6',
+  },
+  itemName: {
+    fontSize: 12,
+    color: '#6B7280',
+    textAlign: 'center',
+    marginTop: 8,
+    lineHeight: 16,
   },
   partSelector: {
     flexDirection: 'row',
@@ -1230,7 +1117,7 @@ const styles = StyleSheet.create({
     width: 80,
     height: 100,
     borderRadius: 8,
-    marginBottom: 8,
+    marginTop: 8,
   },
   partText: {
     fontSize: 13,
@@ -1240,7 +1127,104 @@ const styles = StyleSheet.create({
   partTextActive: {
     color: '#111',
   },
-    // 👇 채팅 관련 스타일 추가
+  recommendBtn: {
+    backgroundColor: '#111',
+    borderRadius: 12,
+    padding: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  recommendBtnDisabled: {
+    backgroundColor: '#D1D5DB',
+  },
+  recommendBtnText: {
+    color: '#FFF',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  resultHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  scoreBadge: {
+    backgroundColor: '#F3F4F6',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+  },
+  scoreText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#111',
+  },
+  recommendationsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+  },
+  recommendationCard: {
+    width: '48%',
+    backgroundColor: '#FFF',
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  recommendationImage: {
+    width: '100%',
+    height: 120,
+    borderRadius: 8,
+    backgroundColor: '#F3F4F6',
+  },
+  recommendationInfo: {
+    marginTop: 12,
+  },
+  recommendationTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#111',
+    lineHeight: 20,
+  },
+  recommendationMeta: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  recommendationScore: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#6B7280',
+  },
+  defaultBadge: {
+    backgroundColor: '#FEF3C7',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 8,
+  },
+  defaultBadgeText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#D97706',
+  },
+  detailedScores: {
+    marginTop: 8,
+    gap: 2,
+  },
+  scoreLabel: {
+    fontSize: 10,
+    color: '#6B7280',
+  },
+  explanationText: {
+    fontSize: 11,
+    color: '#6B7280',
+    marginTop: 8,
+    lineHeight: 16,
+  },
   chatToggleBtn: {
     paddingHorizontal: 10,
     paddingVertical: 8,
@@ -1270,10 +1254,6 @@ const styles = StyleSheet.create({
     margin: 16,
     borderRadius: 16,
     overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOpacity: 0.3,
-    shadowRadius: 20,
-    elevation: 10,
   },
   chatHeader: {
     flexDirection: 'row',
@@ -1282,83 +1262,122 @@ const styles = StyleSheet.create({
     padding: 16,
     borderBottomWidth: 1,
     borderBottomColor: '#E5E7EB',
-    backgroundColor: '#F9FAFB',
   },
-  chatHeaderTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#111',
-  },
-  chatResetBtn: {
-    fontSize: 13,
+  chatTitle: {
+    fontSize: 18,
     fontWeight: '600',
-    color: '#EF4444',
+    color: '#111',
   },
   chatMessages: {
     flex: 1,
-    backgroundColor: '#FFF',
   },
-  chatEmptyState: {
-    flex: 1,
-    justifyContent: 'center',
+  chatMessagesContent: {
+    padding: 16,
+  },
+  welcomeMessage: {
     alignItems: 'center',
-    paddingVertical: 40,
+    paddingVertical: 32,
   },
-  chatEmptyText: {
+  welcomeText: {
     fontSize: 14,
     color: '#6B7280',
     textAlign: 'center',
-    lineHeight: 22,
-  },
-  chatBubble: {
-    maxWidth: '80%',
-    padding: 12,
-    borderRadius: 12,
-    marginBottom: 8,
-  },
-  chatBubbleUser: {
-    alignSelf: 'flex-end',
-    backgroundColor: '#111',
-  },
-  chatBubbleAI: {
-    alignSelf: 'flex-start',
-    backgroundColor: '#F3F4F6',
-  },
-  chatBubbleText: {
-    fontSize: 14,
-    color: '#111',
     lineHeight: 20,
   },
-  chatBubbleTextUser: {
+  messageContainer: {
+    marginVertical: 4,
+    maxWidth: '80%',
+  },
+  userMessage: {
+    alignSelf: 'flex-end',
+    backgroundColor: '#111',
+    borderRadius: 18,
+    borderBottomRightRadius: 4,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  assistantMessage: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#F3F4F6',
+    borderRadius: 18,
+    borderBottomLeftRadius: 4,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  messageText: {
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  userMessageText: {
     color: '#FFF',
+  },
+  assistantMessageText: {
+    color: '#111',
+  },
+  messageTime: {
+    fontSize: 11,
+    color: '#9CA3AF',
+    marginTop: 4,
+    textAlign: 'right',
+  },
+  recommendationsContainer: {
+    backgroundColor: '#F9FAFB',
+    padding: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#E5E7EB',
+  },
+  recommendationsTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#111',
+    marginBottom: 12,
+  },
+  recommendationsList: {
+    flexDirection: 'row',
+    gap: 12,
   },
   chatInputContainer: {
     flexDirection: 'row',
-    padding: 12,
-    gap: 8,
+    alignItems: 'center',
+    padding: 16,
     borderTopWidth: 1,
     borderTopColor: '#E5E7EB',
-    backgroundColor: '#FFF',
+    gap: 12,
   },
   chatInput: {
     flex: 1,
-    backgroundColor: '#F9FAFB',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
+    backgroundColor: '#F3F4F6',
     borderRadius: 20,
     paddingHorizontal: 16,
-    paddingVertical: 10,
+    paddingVertical: 12,
     fontSize: 14,
+    color: '#111',
   },
   chatSendBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     backgroundColor: '#111',
-    justifyContent: 'center',
     alignItems: 'center',
+    justifyContent: 'center',
   },
   chatSendBtnDisabled: {
-    opacity: 0.5,
+    backgroundColor: '#D1D5DB',
+  },
+  emptyState: {
+    alignItems: 'center',
+    paddingVertical: 32,
+    paddingHorizontal: 16,
+  },
+  emptyText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#6B7280',
+    marginBottom: 8,
+  },
+  emptySubtext: {
+    fontSize: 14,
+    color: '#9CA3AF',
+    textAlign: 'center',
   },
 });

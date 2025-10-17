@@ -9,7 +9,7 @@ import {
   X,
   Heart,
 } from 'lucide-react-native';
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Image,
   ImageBackground,
@@ -24,6 +24,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import BottomNavBar from '../common/BottomNavBar';
 import { MainScreen } from '../../App';
 
+const API_BASE_URL = 'https://loyd-extemporaneous-annalise.ngrok-free.dev';
+
 type HomeScreenProps = {
   onNavigate: (step: MainScreen) => void;
   userName?: string;
@@ -36,8 +38,34 @@ export default function HomeScreen({
   onLogout,
 }: HomeScreenProps) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [todayWeather, setTodayWeather] = useState({ 
+    temp: '22°C', 
+    condition: '맑음', 
+    recommendation: '가벼운 레이어드 스타일링 추천' 
+  });
 
-  const todayWeather = { temp: '22°C', condition: '맑음', recommendation: '가벼운 레이어드 스타일링 추천' };
+  // 날씨 데이터 불러오기
+  const fetchWeather = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/weather?city=Seoul`);
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success) {
+          setTodayWeather({
+            temp: `${data.temperature}°C`,
+            condition: data.description,
+            recommendation: data.style_tip
+          });
+        }
+      }
+    } catch (error) {
+      console.error('❌ 날씨 데이터 로드 실패:', error);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchWeather();
+  }, [fetchWeather]);
   const recentOutfits = [
     { id: 1, image: 'https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?w=500', likes: 24, style: '엘레강스' },
     { id: 2, image: 'https://images.unsplash.com/photo-1552374196-c4e7ffc6e126?w=500', likes: 18, style: '스트릿' },
