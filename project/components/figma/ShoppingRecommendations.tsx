@@ -156,8 +156,8 @@ export default function ShoppingRecommendations({ onBack, onNavigate }: Shopping
           </View>
 
           <View style={{ gap: 12 }}>
-            {filteredItems.map((item) => (
-              <View key={item.id} style={styles.cardRow}>
+            {filteredItems.map((item, index) => (
+              <View key={`${item.id}-${index}`} style={styles.cardRow}>
                 <View style={styles.thumbWrap}>
                   <Image source={{ uri: item.image }} style={styles.thumb} />
                   {item.discount > 0 && (

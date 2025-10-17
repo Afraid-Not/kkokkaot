@@ -34,6 +34,7 @@ async def lifespan(app: FastAPI):
     try:
         pipeline = FashionPipeline(
             yolo_pose_path="D:/kkokkaot/API/pre_trained_weights/yolo11n-pose.pt",
+            yolo_detection_path="D:/kkokkaot/API/pre_trained_weights/yolo_best.pt",
             top_model_path="D:/kkokkaot/API/pre_trained_weights/fashion_top_model_1014_2101.pth",
             bottom_model_path="D:/kkokkaot/API/pre_trained_weights/fashion_bottom_model_1015_1038.pth",
             # top_model_path="D:/kkokkaot/API/pre_trained_weights/fashion_top_model.pth",
@@ -435,6 +436,8 @@ def get_wardrobe(user_id: int, include_defaults: bool = True):
                     w.upload_date,
                     w.has_top,
                     w.has_bottom,
+                    w.has_outer,
+                    w.has_dress,
                     w.is_default,
                     t.category as top_category,
                     t.color as top_color,
@@ -462,6 +465,8 @@ def get_wardrobe(user_id: int, include_defaults: bool = True):
                         w.upload_date,
                         w.has_top,
                         w.has_bottom,
+                        w.has_outer,
+                        w.has_dress,
                         w.is_default,
                         t.category as top_category,
                         t.color as top_color,
@@ -488,83 +493,99 @@ def get_wardrobe(user_id: int, include_defaults: bool = True):
             for row in rows:
                 item_id = row[0]
                 image_path = row[1]
+                has_top = row[3]
+                has_bottom = row[4]
+                has_outer = row[5]
+                has_dress = row[6]
                 
-                # ✅ 아우터 판단
-                top_category = row[6].lower() if row[6] else ''
-                outer_keywords = ['coat', 'jacket', 'blazer', 'cardigan', 'jumper']
-                is_outer = any(keyword in top_category for keyword in outer_keywords)
-                
-                # 1순위: 전체 이미지 (full)
+                # ✅ 이미지 우선순위: 전체 이미지 > 개별 카테고리 > 원본
                 display_image_path = None
+                image_category = 'original'
                 
-                # 1순위: 전체 이미지 (full)
+                # 1순위: 전체 이미지 (full) - 전체 카테고리에서 사용
                 full_path = processed_dir / 'full' / f"item_{item_id}_full.jpg"
                 if full_path.exists():
-                    display_image_path = f"item_{item_id}_full.jpg"  # 👈 파일명만!
+                    display_image_path = f"item_{item_id}_full.jpg"
                     image_category = 'full'
                 
-                # 2순위: 상의가 있으면 상의 이미지 (top 또는 outer)
-                elif row[3]:  # has_top
-                    if is_outer:
-                        outer_path = processed_dir / 'outer' / f"item_{item_id}_outer.jpg"
-                        if outer_path.exists():
-                            display_image_path = f"item_{item_id}_outer.jpg"  # 👈 파일명만!
-                            image_category = 'outer'
-                    else:
-                        top_path = processed_dir / 'top' / f"item_{item_id}_top.jpg"
-                        if top_path.exists():
-                            display_image_path = f"item_{item_id}_top.jpg"  # 👈 파일명만!
-                            image_category = 'top'
+                # 2순위: 개별 카테고리 이미지 (카테고리별 필터에서 사용)
+                # 드레스 > 아우터 > 상의 > 하의 순서
+                elif has_dress:
+                    dress_path = processed_dir / 'dress' / f"item_{item_id}_dress.jpg"
+                    if dress_path.exists():
+                        display_image_path = f"item_{item_id}_dress.jpg"
+                        image_category = 'dress'
                 
-                # 3순위: 하의 이미지
-                elif row[4]:  # has_bottom
+                elif has_outer:
+                    outer_path = processed_dir / 'outer' / f"item_{item_id}_outer.jpg"
+                    if outer_path.exists():
+                        display_image_path = f"item_{item_id}_outer.jpg"
+                        image_category = 'outer'
+                
+                elif has_top:
+                    top_path = processed_dir / 'top' / f"item_{item_id}_top.jpg"
+                    if top_path.exists():
+                        display_image_path = f"item_{item_id}_top.jpg"
+                        image_category = 'top'
+                
+                elif has_bottom:
                     bottom_path = processed_dir / 'bottom' / f"item_{item_id}_bottom.jpg"
                     if bottom_path.exists():
-                        display_image_path = f"item_{item_id}_bottom.jpg"  # 👈 파일명만!
+                        display_image_path = f"item_{item_id}_bottom.jpg"
                         image_category = 'bottom'
                 
-                # 4순위: 원본 이미지 (폴백)
+                # 3순위: 원본 이미지 (폴백)
                 if not display_image_path:
                     filename = Path(image_path).name
-                    display_image_path = filename  # 👈 파일명만!
+                    display_image_path = filename
                     image_category = 'original'
                 
                 # 분리된 이미지 경로들
                 top_image = None
                 bottom_image = None
+                outer_image = None
+                dress_image = None
                 
-                if row[3]:  # has_top
-                    if is_outer:
-                        outer_img_path = processed_dir / 'outer' / f"item_{item_id}_outer.jpg"
-                        if outer_img_path.exists():
-                            top_image = f"/api/processed-images/outer/item_{item_id}_outer.jpg"
-                    else:
-                        top_img_path = processed_dir / 'top' / f"item_{item_id}_top.jpg"
-                        if top_img_path.exists():
-                            top_image = f"/api/processed-images/top/item_{item_id}_top.jpg"
+                if has_top:
+                    top_img_path = processed_dir / 'top' / f"item_{item_id}_top.jpg"
+                    if top_img_path.exists():
+                        top_image = f"/api/processed-images/top/item_{item_id}_top.jpg"
                 
-                if row[4]:  # has_bottom
+                if has_bottom:
                     bottom_img_path = processed_dir / 'bottom' / f"item_{item_id}_bottom.jpg"
                     if bottom_img_path.exists():
                         bottom_image = f"/api/processed-images/bottom/item_{item_id}_bottom.jpg"
+                
+                if has_outer:
+                    outer_img_path = processed_dir / 'outer' / f"item_{item_id}_outer.jpg"
+                    if outer_img_path.exists():
+                        outer_image = f"/api/processed-images/outer/item_{item_id}_outer.jpg"
+                
+                if has_dress:
+                    dress_img_path = processed_dir / 'dress' / f"item_{item_id}_dress.jpg"
+                    if dress_img_path.exists():
+                        dress_image = f"/api/processed-images/dress/item_{item_id}_dress.jpg"
                 
                 item = {
                     'id': row[0],
                     'image_path': display_image_path,  # ✅ YOLO로 자른 이미지
                     'image_category': image_category,   # ✅ 카테고리 정보 추가
                     'upload_date': row[2].isoformat() if row[2] else None,
-                    'has_top': row[3],
-                    'has_bottom': row[4],
-                    'is_default': row[5],
-                    'top_category': row[6],
-                    'top_color': row[7],
-                    'top_fit': row[8],
-                    'bottom_category': row[9],
-                    'bottom_color': row[10],
-                    'bottom_fit': row[11],
+                    'has_top': has_top,
+                    'has_bottom': has_bottom,
+                    'has_outer': has_outer,
+                    'has_dress': has_dress,
+                    'is_default': row[7],
+                    'top_category': row[8],
+                    'top_color': row[9],
+                    'top_fit': row[10],
+                    'bottom_category': row[11],
+                    'bottom_color': row[12],
+                    'bottom_fit': row[13],
                     'top_image': top_image,
                     'bottom_image': bottom_image,
-                    'is_outer': is_outer
+                    'outer_image': outer_image,
+                    'dress_image': dress_image
                 }
                 items.append(item)
             
@@ -1037,7 +1058,8 @@ def get_item_detail(item_id: int):
                     w.upload_date,
                     w.has_top,
                     w.has_bottom,
-                    w.waist_y,
+                    w.has_outer,
+                    w.has_dress,
                     -- 상의 속성
                     t.category as top_category,
                     t.color as top_color,
@@ -1076,37 +1098,35 @@ def get_item_detail(item_id: int):
                 'upload_date': row[2].isoformat() if row[2] else None,
                 'has_top': row[3],
                 'has_bottom': row[4],
-                'waist_y': row[5],
+                'has_outer': row[5],
+                'has_dress': row[6],
             }
             
             # 3. 상의 속성
             if row[3]:  # has_top
                 item_data['top_attributes'] = {
-                    'category': row[6],
-                    'color': row[7],
-                    'fit': row[8],
-                    'materials': row[9],
-                    'category_confidence': float(row[10]) if row[10] else 0,
-                    'color_confidence': float(row[11]) if row[11] else 0,
-                    'fit_confidence': float(row[12]) if row[12] else 0,
+                    'category': row[7],
+                    'color': row[8],
+                    'fit': row[9],
+                    'materials': row[10],
+                    'category_confidence': float(row[11]) if row[11] else 0,
+                    'color_confidence': float(row[12]) if row[12] else 0,
+                    'fit_confidence': float(row[13]) if row[13] else 0,
                 }
                 
-                # ✅ 아우터 판단
-                top_category = row[6].lower() if row[6] else ''
-                outer_keywords = ['coat', 'jacket', 'blazer', 'cardigan', 'jumper']
-                is_outer = any(keyword in top_category for keyword in outer_keywords)
-                item_data['is_outer'] = is_outer
+                # ✅ 아우터 판단 (이제 has_outer 필드로 직접 확인)
+                item_data['is_outer'] = row[5]  # has_outer
             
             # 4. 하의 속성
             if row[4]:  # has_bottom
                 item_data['bottom_attributes'] = {
-                    'category': row[13],
-                    'color': row[14],
-                    'fit': row[15],
-                    'materials': row[16],
-                    'category_confidence': float(row[17]) if row[17] else 0,
-                    'color_confidence': float(row[18]) if row[18] else 0,
-                    'fit_confidence': float(row[19]) if row[19] else 0,
+                    'category': row[14],
+                    'color': row[15],
+                    'fit': row[16],
+                    'materials': row[17],
+                    'category_confidence': float(row[18]) if row[18] else 0,
+                    'color_confidence': float(row[19]) if row[19] else 0,
+                    'fit_confidence': float(row[20]) if row[20] else 0,
                 }
             
             # 5. ✅ 분리된 이미지 경로 찾기 (폴더 구조 반영)
@@ -1117,22 +1137,29 @@ def get_item_detail(item_id: int):
             if full_image_path.exists():
                 item_data['full_image_path'] = f"/api/processed-images/full/item_{item_id}_full.jpg"
             
-            # 상의 (top 또는 outer)
+            # 상의
             if row[3]:  # has_top
-                if item_data.get('is_outer'):
-                    outer_image_path = processed_dir / 'outer' / f"item_{item_id}_outer.jpg"
-                    if outer_image_path.exists():
-                        item_data['top_image_path'] = f"/api/processed-images/outer/item_{item_id}_outer.jpg"
-                else:
-                    top_image_path = processed_dir / 'top' / f"item_{item_id}_top.jpg"
-                    if top_image_path.exists():
-                        item_data['top_image_path'] = f"/api/processed-images/top/item_{item_id}_top.jpg"
+                top_image_path = processed_dir / 'top' / f"item_{item_id}_top.jpg"
+                if top_image_path.exists():
+                    item_data['top_image_path'] = f"/api/processed-images/top/item_{item_id}_top.jpg"
             
             # 하의
             if row[4]:  # has_bottom
                 bottom_image_path = processed_dir / 'bottom' / f"item_{item_id}_bottom.jpg"
                 if bottom_image_path.exists():
                     item_data['bottom_image_path'] = f"/api/processed-images/bottom/item_{item_id}_bottom.jpg"
+            
+            # 아우터
+            if row[5]:  # has_outer
+                outer_image_path = processed_dir / 'outer' / f"item_{item_id}_outer.jpg"
+                if outer_image_path.exists():
+                    item_data['outer_image_path'] = f"/api/processed-images/outer/item_{item_id}_outer.jpg"
+            
+            # 드레스
+            if row[6]:  # has_dress
+                dress_image_path = processed_dir / 'dress' / f"item_{item_id}_dress.jpg"
+                if dress_image_path.exists():
+                    item_data['dress_image_path'] = f"/api/processed-images/dress/item_{item_id}_dress.jpg"
             
             print(f"✅ 상세 정보 조회 완료")
             print(f"{'='*60}\n")
@@ -1158,7 +1185,7 @@ def get_processed_image_by_category(category: str, filename: str):
     """카테고리별 분리된 이미지 파일 제공 (full/top/bottom/outer)"""
     
     # 허용된 카테고리 체크
-    allowed_categories = ['full', 'top', 'bottom', 'outer']
+    allowed_categories = ['full', 'top', 'bottom', 'outer', 'dress']
     if category not in allowed_categories:
         raise HTTPException(status_code=400, detail="Invalid category")
     

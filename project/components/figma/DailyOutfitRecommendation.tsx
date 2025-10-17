@@ -189,7 +189,13 @@ export default function DailyOutfitRecommendation({
               has_bottom: item.has_bottom,
             };
         });
-        setWardrobeItems(loadedItems);
+        
+        // ✅ 중복 제거 (같은 ID를 가진 아이템 제거)
+        const uniqueItems = loadedItems.filter((item, index, self) => 
+          index === self.findIndex(t => t.id === item.id)
+        );
+        
+        setWardrobeItems(uniqueItems);
         
         if (loadedItems.length > 0 && baseItemId === null) {
             setBaseItemId(loadedItems[0].id);
@@ -597,9 +603,9 @@ export default function DailyOutfitRecommendation({
                         </Text>
                     </View>
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.baseItemScroll}>
-                        {wardrobeItems.map((item) => (
+                        {wardrobeItems.map((item, index) => (
                             <Pressable 
-                                key={item.id} 
+                                key={`${item.id}-${index}`} 
                                 onPress={() => { setBaseItemId(item.id); setRecommendations([]); }} 
                                 style={[styles.baseItemCard, item.id === baseItemId && styles.baseItemCardActive]}
                                 disabled={loading || recommending}
@@ -728,7 +734,7 @@ export default function DailyOutfitRecommendation({
             <Text style={styles.sectionTitle}>💬 대화 기반 AI 추천</Text>
             <View style={{ gap: 16, marginTop: 16 }}>
               {chatRecommendations.map((item, index) => (
-                <View key={item.id} style={styles.cardRow}>
+                <View key={`${item.id}-${index}`} style={styles.cardRow}>
                   <View style={styles.thumbBig}>
                     <Image 
                       source={{ uri: item.image }} 
