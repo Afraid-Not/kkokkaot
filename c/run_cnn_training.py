@@ -14,7 +14,7 @@ project_root = Path(__file__).parent.parent
 sys.path.append(str(project_root))
 
 # CNN 학습 모듈 임포트
-from c.cnn_label_training import main
+from cnn_label_training import main
 
 if __name__ == "__main__":
     print("🚀 CNN 라벨 학습 실행!")
