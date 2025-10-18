@@ -11,6 +11,7 @@ import bcrypt
 import psycopg2
 from psycopg2.extras import Json
 from fastapi.responses import FileResponse
+import json
 import os
 from contextlib import asynccontextmanager
 from _llm_recommender import LLMRecommender
@@ -1409,10 +1410,227 @@ def get_default_image(filename: str):
         print(f"❌ 기본 아이템 이미지를 찾을 수 없습니다: {file_path}")
         raise HTTPException(status_code=404, detail="Default image not found")
 
+@app.post("/api/chat/upload")
+async def chat_upload_and_recommend(
+    user_id: int = Form(...),
+    image: UploadFile = File(...)
+):
+    """
+    LLM 채팅에서 이미지 업로드 & 자동 추천
+    
+    1. 이미지 업로드
+    2. YOLO 처리 및 속성 예측
+    3. 옷장에 저장
+    4. 저장된 아이템 기반 자동 추천
+    """
+    
+    print(f"\n{'='*60}")
+    print(f"📸 LLM 채팅 이미지 업로드")
+    print(f"  - user_id: {user_id}")
+    print(f"  - filename: {image.filename}")
+    print(f"{'='*60}")
+    
+    try:
+        # 1. 이미지 저장
+        user_upload_dir = UPLOAD_DIR / f"user_{user_id}"
+        user_upload_dir.mkdir(parents=True, exist_ok=True)
+        
+        file_path = user_upload_dir / f"{user_id}_{image.filename}"
+        
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(image.file, buffer)
+        
+        print(f"✅ 파일 저장: {file_path}")
+        
+        # 2. AI 분석 (YOLO + 속성 예측)
+        if not pipeline:
+            return {
+                "success": False,
+                "message": "AI 파이프라인이 비활성화되어 있습니다."
+            }
+        
+        try:
+            result = pipeline.process_image(
+                image_path=str(file_path),
+                user_id=user_id,
+                save_separated_images=True
+            )
+            
+            if not result['success']:
+                return {
+                    "success": False,
+                    "message": f"분석 실패: {result.get('error', '알 수 없는 오류')}"
+                }
+            
+            item_id = result['item_id']
+            print(f"✅ AI 분석 완료 - item_id: {item_id}")
+            
+            # 3. 저장된 아이템 정보 가져오기
+            with pipeline.db_conn.cursor() as cur:
+                cur.execute("""
+                    SELECT 
+                        w.item_id,
+                        w.original_image_path,
+                        w.has_top,
+                        w.has_bottom,
+                        w.has_outer,
+                        w.has_dress,
+                        w.is_default,
+                        w.user_id,
+                        t.category as top_category,
+                        t.color as top_color,
+                        b.category as bottom_category,
+                        b.color as bottom_color,
+                        o.category as outer_category,
+                        o.color as outer_color,
+                        d.category as dress_category,
+                        d.color as dress_color
+                    FROM wardrobe_items w
+                    LEFT JOIN top_attributes t ON w.item_id = t.item_id
+                    LEFT JOIN bottom_attributes b ON w.item_id = b.item_id
+                    LEFT JOIN outer_attributes o ON w.item_id = o.item_id
+                    LEFT JOIN dress_attributes d ON w.item_id = d.item_id
+                    WHERE w.item_id = %s
+                """, (item_id,))
+                
+                row = cur.fetchone()
+                
+                if not row:
+                    return {
+                        "success": False,
+                        "message": "아이템 정보를 찾을 수 없습니다."
+                    }
+                
+                # 아이템 정보 파싱
+                has_top = row[2]
+                has_bottom = row[3]
+                has_outer = row[4]
+                has_dress = row[5]
+                is_default = row[6]
+                item_user_id = row[7]
+                
+                # 아이템 이름 생성
+                name_parts = []
+                if has_dress and row[15]:
+                    name_parts.append(f"{row[15]} {row[14] or 'dress'}")
+                else:
+                    if has_top and row[9]:
+                        name_parts.append(f"{row[9]} {row[8] or 'top'}")
+                    if has_bottom and row[11]:
+                        if name_parts:
+                            name_parts.append("/")
+                        name_parts.append(f"{row[11]} {row[10] or 'bottom'}")
+                    if has_outer and row[13]:
+                        if name_parts:
+                            name_parts.append("+")
+                        name_parts.append(f"{row[13]} {row[12] or 'outer'}")
+                
+                item_name = ' '.join(name_parts) if name_parts else f"아이템 #{item_id}"
+                
+                # 이미지 경로 생성
+                processed_dir = Path("./processed_images") / f"user_{item_user_id}"
+                display_image = None
+                
+                # full 이미지 우선
+                full_path = processed_dir / 'full' / f"item_{item_id}_full.jpg"
+                if full_path.exists():
+                    display_image = f"/api/processed-images/user_{item_user_id}/full/item_{item_id}_full.jpg"
+                
+                # 카테고리별 이미지
+                if not display_image:
+                    if has_dress:
+                        dress_path = processed_dir / 'dress' / f"item_{item_id}_dress.jpg"
+                        if dress_path.exists():
+                            display_image = f"/api/processed-images/user_{item_user_id}/dress/item_{item_id}_dress.jpg"
+                    elif has_outer:
+                        outer_path = processed_dir / 'outer' / f"item_{item_id}_outer.jpg"
+                        if outer_path.exists():
+                            display_image = f"/api/processed-images/user_{item_user_id}/outer/item_{item_id}_outer.jpg"
+                    elif has_top:
+                        top_path = processed_dir / 'top' / f"item_{item_id}_top.jpg"
+                        if top_path.exists():
+                            display_image = f"/api/processed-images/user_{item_user_id}/top/item_{item_id}_top.jpg"
+                    elif has_bottom:
+                        bottom_path = processed_dir / 'bottom' / f"item_{item_id}_bottom.jpg"
+                        if bottom_path.exists():
+                            display_image = f"/api/processed-images/user_{item_user_id}/bottom/item_{item_id}_bottom.jpg"
+                
+                if not display_image:
+                    filename = Path(row[1]).name
+                    display_image = f"/api/images/{filename}"
+                
+                uploaded_item = {
+                    'id': item_id,
+                    'name': item_name,
+                    'image': display_image,
+                    'has_top': has_top,
+                    'has_bottom': has_bottom,
+                    'has_outer': has_outer,
+                    'has_dress': has_dress,
+                }
+            
+            # 4. LLM 응답 생성 (업로드 완료 메시지)
+            if llm_recommender:
+                llm_result = llm_recommender.chat(
+                    user_id, 
+                    f"사용자가 새 옷을 추가했습니다: {item_name}"
+                )
+                ai_message = llm_result['response']
+            else:
+                ai_message = f"✨ {item_name}을(를) 옷장에 추가했어요! 이 옷과 어울리는 코디를 추천해드릴까요?"
+            
+            print(f"✅ 업로드 & 분석 완료")
+            print(f"{'='*60}\n")
+            
+            return {
+                "success": True,
+                "message": ai_message,
+                "uploaded_item": uploaded_item,
+                "item_id": item_id
+            }
+        
+        except ValueError as ve:
+            print(f"❌ 의류 감지 실패: {ve}")
+            
+            # 이미지 파일 삭제
+            try:
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+            except Exception:
+                pass
+            
+            return {
+                "success": False,
+                "message": "의류가 확인되지 않습니다. 다른 사진을 시도해주세요.",
+                "error_type": "detection_failed"
+            }
+        
+        except Exception as e:
+            print(f"❌ 처리 중 오류: {e}")
+            import traceback
+            traceback.print_exc()
+            
+            return {
+                "success": False,
+                "message": f"처리 중 오류: {str(e)}"
+            }
+    
+    except Exception as e:
+        print(f"❌ 업로드 실패: {e}")
+        import traceback
+        traceback.print_exc()
+        
+        return {
+            "success": False,
+            "message": f"업로드 실패: {str(e)}"
+        }
+
+
 @app.post("/api/chat/recommend")
 async def chat_recommend(
     user_id: int = Form(...),
-    message: str = Form(...)
+    message: str = Form(...),
+    selected_items: str = Form(None)
 ):
     """
     LLM 기반 대화형 옷 추천 API
@@ -1421,12 +1639,15 @@ async def chat_recommend(
     1. LLM과 대화
     2. 컨텍스트 추출 (날씨, 상황, 건강 등)
     3. 적절한 옷 추천
+    4. 선택된 아이템 기반 추천 (selected_items가 있을 경우)
     """
     
     print(f"\n{'='*60}")
     print(f"💬 LLM 채팅 요청")
     print(f"  - user_id: {user_id}")
     print(f"  - message: {message}")
+    if selected_items:
+        print(f"  - selected_items: {selected_items}")
     print(f"{'='*60}")
     
     if not llm_recommender:
@@ -1436,8 +1657,17 @@ async def chat_recommend(
         }
     
     try:
+        # 선택된 아이템 ID 파싱
+        selected_item_ids = []
+        if selected_items:
+            try:
+                selected_item_ids = json.loads(selected_items)
+                print(f"✅ 선택된 아이템: {selected_item_ids}")
+            except json.JSONDecodeError:
+                print("⚠️ selected_items 파싱 실패")
+        
         # LLM 대화 및 추천 생성
-        result = llm_recommender.chat(user_id, message)
+        result = llm_recommender.chat(user_id, message, selected_item_ids)
         
         # 추천 아이템 상세 정보 가져오기
         recommended_items = []
@@ -1450,27 +1680,123 @@ async def chat_recommend(
                             w.original_image_path,
                             w.has_top,
                             w.has_bottom,
+                            w.has_outer,
+                            w.has_dress,
+                            w.is_default,
+                            w.user_id,
                             t.category as top_category,
                             t.color as top_color,
                             b.category as bottom_category,
-                            b.color as bottom_color
+                            b.color as bottom_color,
+                            o.category as outer_category,
+                            o.color as outer_color,
+                            d.category as dress_category,
+                            d.color as dress_color
                         FROM wardrobe_items w
                         LEFT JOIN top_attributes t ON w.item_id = t.item_id
                         LEFT JOIN bottom_attributes b ON w.item_id = b.item_id
+                        LEFT JOIN outer_attributes o ON w.item_id = o.item_id
+                        LEFT JOIN dress_attributes d ON w.item_id = d.item_id
                         WHERE w.item_id = %s
                     """, (item_id,))
                     
                     row = cur.fetchone()
                     if row:
+                        item_id_val = row[0]
+                        has_top = row[2]
+                        has_bottom = row[3]
+                        has_outer = row[4]
+                        has_dress = row[5]
+                        is_default = row[6]
+                        item_user_id = row[7]
+                        
+                        # 아이템 이름 생성 (카테고리별로 구분)
+                        name_parts = []
+                        if has_dress and row[15]:  # dress_color
+                            name_parts.append(f"{row[15]} {row[14] or 'dress'}")  # dress_color + dress_category
+                        else:
+                            if has_top and row[9]:  # top_color
+                                name_parts.append(f"{row[9]} {row[8] or 'top'}")  # top_color + top_category
+                            if has_bottom and row[11]:  # bottom_color
+                                if name_parts:
+                                    name_parts.append("/")
+                                name_parts.append(f"{row[11]} {row[10] or 'bottom'}")  # bottom_color + bottom_category
+                            if has_outer and row[13]:  # outer_color
+                                if name_parts:
+                                    name_parts.append("+")
+                                name_parts.append(f"{row[13]} {row[12] or 'outer'}")  # outer_color + outer_category
+                        
+                        item_name = ' '.join(name_parts) if name_parts else f"아이템 #{item_id_val}"
+                        
+                        # 이미지 경로 생성 (옷장 API와 동일한 로직)
+                        if is_default:
+                            processed_dir = Path("./processed_images")
+                        else:
+                            processed_dir = Path("./processed_images") / f"user_{item_user_id}"
+                        
+                        # 이미지 우선순위: full > 카테고리별
+                        display_image = None
+                        
+                        # 1순위: full 이미지
+                        full_path = processed_dir / 'full' / f"item_{item_id_val}_full.jpg"
+                        if full_path.exists():
+                            if is_default:
+                                display_image = f"/api/processed-images/full/item_{item_id_val}_full.jpg"
+                            else:
+                                display_image = f"/api/processed-images/user_{item_user_id}/full/item_{item_id_val}_full.jpg"
+                        
+                        # 2순위: 카테고리별 이미지 (드레스 > 아우터 > 상의 > 하의)
+                        if not display_image:
+                            if has_dress:
+                                dress_path = processed_dir / 'dress' / f"item_{item_id_val}_dress.jpg"
+                                if dress_path.exists():
+                                    if is_default:
+                                        display_image = f"/api/processed-images/dress/item_{item_id_val}_dress.jpg"
+                                    else:
+                                        display_image = f"/api/processed-images/user_{item_user_id}/dress/item_{item_id_val}_dress.jpg"
+                            elif has_outer:
+                                outer_path = processed_dir / 'outer' / f"item_{item_id_val}_outer.jpg"
+                                if outer_path.exists():
+                                    if is_default:
+                                        display_image = f"/api/processed-images/outer/item_{item_id_val}_outer.jpg"
+                                    else:
+                                        display_image = f"/api/processed-images/user_{item_user_id}/outer/item_{item_id_val}_outer.jpg"
+                            elif has_top:
+                                top_path = processed_dir / 'top' / f"item_{item_id_val}_top.jpg"
+                                if top_path.exists():
+                                    if is_default:
+                                        display_image = f"/api/processed-images/top/item_{item_id_val}_top.jpg"
+                                    else:
+                                        display_image = f"/api/processed-images/user_{item_user_id}/top/item_{item_id_val}_top.jpg"
+                            elif has_bottom:
+                                bottom_path = processed_dir / 'bottom' / f"item_{item_id_val}_bottom.jpg"
+                                if bottom_path.exists():
+                                    if is_default:
+                                        display_image = f"/api/processed-images/bottom/item_{item_id_val}_bottom.jpg"
+                                    else:
+                                        display_image = f"/api/processed-images/user_{item_user_id}/bottom/item_{item_id_val}_bottom.jpg"
+                        
+                        # 3순위: 원본 이미지 (폴백)
+                        if not display_image:
+                            filename = Path(row[1]).name
+                            display_image = f"/api/images/{filename}"
+                        
                         item_data = {
-                            'id': row[0],
-                            'image': f"/api/images/{Path(row[1]).name}",
-                            'has_top': row[2],
-                            'has_bottom': row[3],
-                            'top_category': row[4],
-                            'top_color': row[5],
-                            'bottom_category': row[6],
-                            'bottom_color': row[7],
+                            'id': item_id_val,
+                            'name': item_name,
+                            'image': display_image,
+                            'has_top': has_top,
+                            'has_bottom': has_bottom,
+                            'has_outer': has_outer,
+                            'has_dress': has_dress,
+                            'top_category': row[8],
+                            'top_color': row[9],
+                            'bottom_category': row[10],
+                            'bottom_color': row[11],
+                            'outer_category': row[12],
+                            'outer_color': row[13],
+                            'dress_category': row[14],
+                            'dress_color': row[15],
                         }
                         recommended_items.append(item_data)
         

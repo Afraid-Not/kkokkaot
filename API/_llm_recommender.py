@@ -11,6 +11,7 @@
 
 import os
 import json
+import re
 from typing import Dict, List, Optional
 import psycopg2
 from transformers import AutoTokenizer, AutoModelForCausalLM
@@ -25,7 +26,7 @@ class LLMRecommender:
         
         Args:
             db_config: PostgreSQL 연결 설정
-            model_name: 사용할 Llama 모델 이름
+            model_name: 사용할 한국어 특화 모델 이름
         """
         print("\n🤖 LLM 추천 시스템 초기화 중...")
         
@@ -46,13 +47,14 @@ class LLMRecommender:
         # 대화 히스토리 저장
         self.conversation_history = {}
     
-    def chat(self, user_id: int, user_message: str) -> Dict:
+    def chat(self, user_id: int, user_message: str, selected_item_ids: list = None) -> Dict:
         """
         사용자와 대화하고 추천 생성
         
         Args:
             user_id: 사용자 ID
             user_message: 사용자 메시지
+            selected_item_ids: 선택된 아이템 ID 리스트 (옵션)
             
         Returns:
             dict: {
@@ -64,6 +66,8 @@ class LLMRecommender:
         """
         print(f"\n{'='*60}")
         print(f"💬 사용자 메시지: {user_message}")
+        if selected_item_ids:
+            print(f"👕 선택된 아이템: {selected_item_ids}")
         print(f"{'='*60}")
         
         # 1. 대화 히스토리 가져오기
@@ -72,8 +76,13 @@ class LLMRecommender:
         
         history = self.conversation_history[user_id]
         
-        # 2. 시스템 프롬프트 구성
-        system_prompt = self._build_system_prompt()
+        # 2. 옷장 정보 가져오기 (새로 추가)
+        wardrobe_info = self._get_wardrobe_summary(user_id)
+        print(f"📋 옷장 정보: {wardrobe_info}")
+        
+        # 3. 시스템 프롬프트 구성
+        system_prompt = self._build_system_prompt(wardrobe_info)
+        print(f"📝 시스템 프롬프트 (첫 200자): {system_prompt[:200]}...")
         
         # 3. 대화 히스토리를 포함한 프롬프트 생성
         messages = [
@@ -83,7 +92,7 @@ class LLMRecommender:
         ]
         
         # 4. LLM 응답 생성
-        llm_response = self._generate_response(messages)
+        llm_response = self._generate_response(messages, wardrobe_info)
         
         # 5. 히스토리에 추가
         history.append({"role": "user", "content": user_message})
@@ -98,82 +107,428 @@ class LLMRecommender:
         context = self._extract_context(history)
         print(f"\n📋 추출된 컨텍스트: {json.dumps(context, ensure_ascii=False, indent=2)}")
         
-        # 7. 추천 필요 여부 판단
-        need_recommendations = self._should_recommend(context)
+        # 7. 선택된 아이템 기반 추천 확인
+        is_recommendation_request = self._is_recommendation_request(user_message)
         
         recommendations = []
-        if need_recommendations:
-            # 8. 옷장 아이템 필터링 및 추천
-            recommendations = self._recommend_items(user_id, context)
+        
+        if selected_item_ids and is_recommendation_request:
+            # 선택된 아이템 기반 추천
+            print(f"\n🎯 선택된 아이템 기반 추천 시작...")
+            recommendations = self._recommend_based_on_selected(user_id, selected_item_ids, context)
             print(f"\n✨ 추천 아이템: {len(recommendations)}개")
+        else:
+            # 8. 옷장 전체 보기 요청 확인
+            show_all_wardrobe = self._is_show_wardrobe_request(user_message)
+            
+            if show_all_wardrobe:
+                # 옷장 전체 보기
+                recommendations = self._get_all_wardrobe_items(user_id)
+                print(f"\n👕 옷장 전체 보기: {len(recommendations)}개 아이템")
+            else:
+                # 9. 추천 필요 여부 판단
+                need_recommendations = self._should_recommend(context)
+                
+                if need_recommendations:
+                    # 10. 옷장 아이템 필터링 및 추천
+                    recommendations = self._recommend_items(user_id, context)
+                    print(f"\n✨ 추천 아이템: {len(recommendations)}개")
         
         return {
             'response': llm_response,
             'context': context,
             'recommendations': recommendations,
-            'need_more_info': not need_recommendations
+            'need_more_info': not (selected_item_ids and is_recommendation_request) and not show_all_wardrobe and not self._should_recommend(context)
         }
     
-    # ✅ _build_system_prompt 함수 전체 교체
-    def _build_system_prompt(self) -> str:
-        """시스템 프롬프트 구성"""
-        return """You are a friendly Korean fashion stylist AI assistant.
-
-    **Your goal:** Have a natural conversation to understand what clothes the user needs today.
-
-    **Information to gather:**
-    1. Weather/Temperature (cold, hot, rainy, etc.)
-    2. Occasion/Place (work, date, exercise, party, etc.)
-    3. Style preference (casual, formal, comfortable, etc.)
-
-    **Conversation rules:**
-    - Keep responses SHORT (1-2 sentences max)
-    - Ask only 1-2 questions at a time
-    - Be casual and friendly in Korean (반말)
-    - Use emojis appropriately
-    - When you have 2+ pieces of information, say "좋아! 추천 시작할게!" and stop asking
-
-    **Example conversation:**
-    User: "오늘 뭐 입을까요?"
-    You: "오늘 어디 가? 날씨는 어때? 😊"
-
-    User: "결혼식 가는데 좀 추워요"
-    You: "좋아! 추운 날 결혼식 가는 거구나! 깔끔하고 따뜻한 스타일 찾아줄게! ✨"
-
-    **IMPORTANT:**
-    - Keep it simple and natural
-    - Don't write long paragraphs
-    - Focus on the user's current situation"""
+    def _is_recommendation_request(self, user_message: str) -> bool:
+        """추천 요청인지 확인"""
+        msg = user_message.lower().strip()
+        keywords = ['추천', '스타일링', '패션', '코디', '어울리', '매칭', '입', '입을', '조합', '믹스매치']
+        return any(keyword in msg for keyword in keywords)
     
-    def _generate_response(self, messages: List[Dict]) -> str:
+    def _is_show_wardrobe_request(self, user_message: str) -> bool:
+        """옷장 전체 보기 요청인지 확인"""
+        msg = user_message.lower().strip()
+        keywords = ['옷장 보여', '옷장 보기', '옷장 전체', '내 옷 보여', '내 옷장', '가진 옷', '뭐 있', '몇 개']
+        return any(keyword in msg for keyword in keywords)
+    
+    def _recommend_based_on_selected(self, user_id: int, selected_item_ids: list, context: dict) -> list:
+        """선택된 아이템 기반 추천"""
+        try:
+            with self.db_conn.cursor() as cur:
+                # 선택된 아이템의 속성 가져오기
+                placeholders = ','.join(['%s'] * len(selected_item_ids))
+                query = f"""
+                    SELECT 
+                        w.item_id,
+                        w.has_top, w.has_bottom, w.has_outer, w.has_dress,
+                        t.category as top_cat, t.color as top_color,
+                        b.category as bottom_cat, b.color as bottom_color,
+                        o.category as outer_cat, o.color as outer_color,
+                        d.category as dress_cat, d.color as dress_color
+                    FROM wardrobe_items w
+                    LEFT JOIN top_attributes t ON w.item_id = t.item_id
+                    LEFT JOIN bottom_attributes b ON w.item_id = b.item_id
+                    LEFT JOIN outer_attributes o ON w.item_id = o.item_id
+                    LEFT JOIN dress_attributes d ON w.item_id = d.item_id
+                    WHERE w.item_id IN ({placeholders})
+                """
+                
+                cur.execute(query, selected_item_ids)
+                selected_items = cur.fetchall()
+                
+                if not selected_items:
+                    print("⚠️ 선택된 아이템 정보를 찾을 수 없음")
+                    return []
+                
+                # 선택된 아이템 분석
+                has_top = any(row[1] for row in selected_items)
+                has_bottom = any(row[2] for row in selected_items)
+                has_outer = any(row[3] for row in selected_items)
+                has_dress = any(row[4] for row in selected_items)
+                
+                print(f"📊 선택된 아이템 분석: 상의={has_top}, 하의={has_bottom}, 아우터={has_outer}, 드레스={has_dress}")
+                
+                # 어울리는 아이템 추천 (부족한 카테고리 추천)
+                filters = []
+                
+                if has_dress:
+                    # 드레스가 있으면 아우터 추천
+                    filters.append("w.has_outer = TRUE")
+                elif has_top and has_bottom:
+                    # 상의 + 하의가 있으면 아우터 추천
+                    filters.append("w.has_outer = TRUE")
+                elif has_top:
+                    # 상의만 있으면 하의 추천
+                    filters.append("w.has_bottom = TRUE")
+                elif has_bottom:
+                    # 하의만 있으면 상의 추천
+                    filters.append("w.has_top = TRUE")
+                else:
+                    # 아우터만 있으면 상의+하의 또는 드레스 추천
+                    filters.append("(w.has_top = TRUE OR w.has_dress = TRUE)")
+                
+                # 선택된 아이템 제외
+                excluded_ids = ','.join(map(str, selected_item_ids))
+                filters.append(f"w.item_id NOT IN ({excluded_ids})")
+                
+                where_clause = " AND ".join(filters)
+                
+                recommendation_query = f"""
+                    SELECT w.item_id, w.user_id, 
+                           CASE WHEN w.user_id = %s THEN 0 ELSE 1 END as user_priority
+                    FROM wardrobe_items w
+                    LEFT JOIN top_attributes t ON w.item_id = t.item_id
+                    LEFT JOIN bottom_attributes b ON w.item_id = b.item_id
+                    WHERE (w.user_id = %s OR w.is_default = TRUE)
+                      AND ({where_clause})
+                    GROUP BY w.item_id, w.user_id
+                    ORDER BY user_priority, w.item_id DESC
+                    LIMIT 5
+                """
+                
+                cur.execute(recommendation_query, (user_id, user_id))
+                results = cur.fetchall()
+                
+                item_ids = [row[0] for row in results]
+                print(f"✅ 추천 아이템 ID: {item_ids}")
+                
+                return item_ids
+        
+        except Exception as e:
+            print(f"❌ 선택 기반 추천 오류: {e}")
+            import traceback
+            traceback.print_exc()
+            
+            # 트랜잭션 롤백
+            try:
+                self.db_conn.rollback()
+                print("🔄 트랜잭션 롤백 완료")
+            except Exception as rollback_error:
+                print(f"⚠️ 롤백 실패: {rollback_error}")
+            
+            return []
+    
+    def _get_all_wardrobe_items(self, user_id: int) -> list:
+        """사용자의 전체 옷장 아이템 가져오기"""
+        try:
+            with self.db_conn.cursor() as cur:
+                cur.execute("""
+                    SELECT DISTINCT item_id
+                    FROM wardrobe_items
+                    WHERE user_id = %s
+                    ORDER BY item_id DESC
+                """, (user_id,))
+                
+                results = cur.fetchall()
+                item_ids = [row[0] for row in results]
+                
+                print(f"  ✅ 옷장 전체 아이템 ID: {item_ids}")
+                return item_ids
+        
+        except Exception as e:
+            print(f"  ❌ 옷장 아이템 조회 오류: {e}")
+            
+            # 트랜잭션 롤백
+            try:
+                self.db_conn.rollback()
+                print("🔄 트랜잭션 롤백 완료")
+            except Exception as rollback_error:
+                print(f"⚠️ 롤백 실패: {rollback_error}")
+            
+            return []
+    
+    def _get_wardrobe_summary(self, user_id: int) -> str:
+        """사용자 옷장 요약 정보 가져오기"""
+        print(f"\n👕 옷장 정보 조회 시작... user_id: {user_id}")
+        try:
+            with self.db_conn.cursor() as cur:
+                cur.execute("""
+                    SELECT 
+                        COUNT(*) as total,
+                        COUNT(CASE WHEN has_top THEN 1 END) as tops,
+                        COUNT(CASE WHEN has_bottom THEN 1 END) as bottoms,
+                        COUNT(CASE WHEN has_outer THEN 1 END) as outers,
+                        COUNT(CASE WHEN has_dress THEN 1 END) as dresses
+                    FROM wardrobe_items
+                    WHERE user_id = %s
+                """, (user_id,))
+                
+                result = cur.fetchone()
+                print(f"📦 쿼리 결과: {result}")
+                
+                if result and result[0] > 0:
+                    total, tops, bottoms, outers, dresses = result
+                    summary = f"옷장: 총 {total}개 (상의 {tops}개, 하의 {bottoms}개, 아우터 {outers}개, 원피스 {dresses}개)"
+                    print(f"✅ 옷장 요약: {summary}")
+                    return summary
+                else:
+                    print(f"⚠️ 옷장이 비어있음")
+                    return "옷장이 비어있음"
+        except Exception as e:
+            print(f"❌ 옷장 정보 조회 실패: {e}")
+            import traceback
+            traceback.print_exc()
+            
+            # 트랜잭션 롤백
+            try:
+                self.db_conn.rollback()
+                print("🔄 트랜잭션 롤백 완료")
+            except Exception as rollback_error:
+                print(f"⚠️ 롤백 실패: {rollback_error}")
+            
+            return "옷장 정보 없음"
+    
+    # ✅ _build_system_prompt 함수 전체 교체
+    def _build_system_prompt(self, wardrobe_info: str = "") -> str:
+        """시스템 프롬프트 구성"""
+        wardrobe_context = f"\n\n**사용자 {wardrobe_info}**" if wardrobe_info else ""
+        
+        return f"""당신은 친근한 한국 패션 스타일리스트 AI입니다.{wardrobe_context}
+
+**역할:**
+오늘 사용자에게 필요한 옷을 파악하기 위해 자연스럽게 대화하세요.
+
+**수집할 정보:**
+1. 날씨/온도 (춥다, 덥다, 비온다 등)
+2. 상황/장소 (출근, 데이트, 운동, 파티 등)
+3. 스타일 선호 (캐주얼, 격식, 편안함 등)
+
+**대화 규칙:**
+- 응답은 1-2문장으로 짧게 유지
+- 한 번에 1-2개 질문만
+- 친근하게 반말로 대화
+- 이모지 적절히 사용
+- 2가지 이상 정보를 얻으면 "좋아! 추천 시작할게!" 하고 질문 중단
+- 사용자가 "내 옷장"이나 "뭐 있어?"라고 물으면 옷장 정보를 알려줌
+
+**대화 예시:**
+사용자: "오늘 뭐 입을까?"
+AI: "오늘 어디 가? 날씨는 어때? 😊"
+
+사용자: "회사 가는데 좀 추워"
+AI: "알겠어! 추운 날 출근 스타일 찾아줄게! 깔끔하고 따뜻한 옷 추천할게 ✨"
+
+사용자: "데이트하는데 시원한 옷"
+AI: "좋아! 데이트에 시원하면서 멋진 스타일 찾아줄게! 💕"
+
+**중요:**
+- 자연스럽고 짧게
+- 긴 문장 금지
+- 사용자 상황에 집중
+- 한국어로만 대화"""
+    
+    def _get_rule_based_response(self, user_message: str, history: List[Dict], wardrobe_info: str = "") -> Optional[str]:
+        """규칙 기반 응답 (우선 사용)"""
+        msg = user_message.lower().strip()
+        
+        # 인사
+        if any(word in msg for word in ['안녕', '하이', '헬로', '안뇽', 'hi', 'hello']):
+            if len(history) == 0:
+                return "안녕하세요! 오늘 뭐 입을지 고민이신가요? 😊"
+            return "네! 무엇을 도와드릴까요?"
+        
+        # 옷장 관련 (전체 보기)
+        if any(word in msg for word in ['옷장 보여', '옷장 보기', '옷장 전체', '내 옷 보여']):
+            if wardrobe_info and '옷장:' in wardrobe_info:
+                return f"옷장을 보여드릴게요! {wardrobe_info.replace('옷장:', '')} 있네요 👗✨"
+            return "옷장을 보여드릴게요! 👗✨"
+        
+        # 옷장 관련 (개수 질문)
+        if any(word in msg for word in ['몇 개', '몇개', '개수', '얼마나']):
+            if wardrobe_info and '옷장:' in wardrobe_info:
+                return f"{wardrobe_info.replace('옷장:', '')} 있어요! 옷장을 보여드릴까요? 😊"
+            return "옷장을 확인해볼게요!"
+        
+        # 옷장 관련 (일반)
+        if any(word in msg for word in ['옷장', '뭐 있', '가진 옷', '내 옷', '내꺼']):
+            if wardrobe_info and '옷장:' in wardrobe_info:
+                return f"{wardrobe_info.replace('옷장:', '')} 있어요! 보여드릴까요?"
+            return "옷장을 확인해볼게요! 어떤 스타일을 찾고 계세요?"
+        
+        # 추천 요청
+        if any(word in msg for word in ['추천', '뭐 입', '코디', '입을까', '매칭', '골라', '스타일링', '패션', '어울리', '조합']):
+            return "좋아요! 어울리는 옷을 찾아드릴게요! ✨"
+        
+        # 날씨 - 춥다
+        if any(word in msg for word in ['춥', '추워', '추운', '겨울', '쌀쌀']):
+            if any(word in msg for word in ['회사', '출근', '일', '미팅']):
+                return "추운 날 출근 스타일이네요! 따뜻하고 단정한 옷 찾아드릴게요 ✨"
+            elif any(word in msg for word in ['데이트', '만남', '약속']):
+                return "추운 날 데이트 룩이네요! 따뜻하면서 멋진 스타일 찾아드릴게요 💕"
+            return "추운 날씨네요! 어디 가시나요? (출근/데이트/운동 등)"
+        
+        # 날씨 - 덥다
+        if any(word in msg for word in ['더워', '덥', '더운', '여름', '뜨거']):
+            if any(word in msg for word in ['회사', '출근', '일', '미팅']):
+                return "더운 날 출근 스타일이네요! 시원하고 단정한 옷 찾아드릴게요 ✨"
+            return "더운 날씨네요! 어디 가시나요?"
+        
+        # 날씨 - 따뜻하다
+        if any(word in msg for word in ['따뜻', '포근', '선선']):
+            return "따뜻한 옷 찾으시는군요! 어디 가시나요? (출근/데이트/운동 등)"
+        
+        # 상황 - 출근
+        if any(word in msg for word in ['회사', '출근', '일', '미팅', '업무']):
+            return "출근 룩이시군요! 날씨는 어떠세요? (춥다/덥다/적당)"
+        
+        # 상황 - 데이트
+        if any(word in msg for word in ['데이트', '소개팅', '만남', '약속']):
+            return "데이트 룩이시군요! 날씨는 어떠세요?"
+        
+        # 상황 - 운동
+        if any(word in msg for word in ['운동', '헬스', '조깅', '요가', '필라테스']):
+            return "운동 복장이시군요! 편하고 활동적인 옷 찾아드릴게요! 💪"
+        
+        # 비
+        if any(word in msg for word in ['비', '우산', '장마', '빗물']):
+            return "비 오는 날이네요! 어두운 색 옷이 좋을 것 같아요. 어디 가세요?"
+        
+        # 불만/재시도
+        if any(word in msg for word in ['뭐라', '이상', '다시', '못', '제대로', '영어', '이해']):
+            return "죄송해요! 다시 말씀해주시겠어요? 간단하게 말씀해주시면 도와드릴게요! 😊"
+        
+        # 감사
+        if any(word in msg for word in ['고마', '감사', '땡큐', 'thanks']):
+            return "천만에요! 또 필요하시면 언제든지 말씀해주세요! 😊"
+        
+        # 도움말
+        if any(word in msg for word in ['도움', '사용법', '어떻게', '방법']):
+            return "날씨와 상황을 알려주시면 옷을 추천해드려요! 예: '추운데 회사 가', '더운데 데이트' 😊"
+        
+        # 짧은 응답들 (2글자 이하)
+        if len(msg) <= 2:
+            return "좀 더 자세히 말씀해주시겠어요? 😊"
+        
+        # 기본 폴백 (패턴 매칭 안됨)
+        return "무엇을 도와드릴까요? 날씨와 상황을 알려주시면 옷을 추천해드려요! 😊"
+    
+    def _generate_response(self, messages: List[Dict], wardrobe_info: str = "") -> str:
         """LLM 응답 생성"""
         
-        # 토크나이저 적용
-        inputs = self.tokenizer.apply_chat_template(
-            messages,
+        # 규칙 기반 응답 먼저 시도
+        if len(messages) > 1 and messages[-1]['role'] == 'user':
+            user_msg = messages[-1]['content']
+            history = [m for m in messages[1:-1]]  # 시스템 프롬프트 제외
+            rule_response = self._get_rule_based_response(user_msg, history, wardrobe_info)
+            if rule_response:
+                print(f"\n🎯 규칙 기반 응답 사용: {rule_response}")
+                return rule_response
+        
+        # LLM 응답 생성
+        prompt = ""
+        for msg in messages:
+            role = msg["role"]
+            content = msg["content"]
+            if role == "system":
+                prompt += f"{content}\n\n"
+            elif role == "user":
+                prompt += f"사용자: {content}\n"
+            elif role == "assistant":
+                prompt += f"AI: {content}\n"
+        
+        prompt += "AI: "
+        
+        print(f"\n📝 프롬프트 (마지막 150자): ...{prompt[-150:]}")
+        
+        # 토크나이징
+        inputs = self.tokenizer(
+            prompt,
             return_tensors="pt",
-            add_generation_prompt=True
+            truncation=True,
+            max_length=2048
         ).to(self.model.device)
         
         # 생성
         with torch.no_grad():
             outputs = self.model.generate(
-                inputs,
-                max_new_tokens=100,  # 👈 150 → 100으로 줄임
-                temperature=0.5,     # 👈 0.7 → 0.5로 줄임 (더 집중된 응답)
-                top_p=0.9,
+                **inputs,
+                max_new_tokens=100,  # 짧게
+                temperature=0.8,     # 자연스러운 응답
+                top_p=0.95,
+                top_k=50,           # 다양성 제어
+                repetition_penalty=1.5,  # 반복 강력 방지
                 do_sample=True,
-                pad_token_id=self.tokenizer.eos_token_id
+                pad_token_id=self.tokenizer.eos_token_id if self.tokenizer.pad_token_id is None else self.tokenizer.pad_token_id,
+                eos_token_id=self.tokenizer.eos_token_id
             )
         
         # 디코딩
-        response = self.tokenizer.decode(outputs[0][inputs.shape[1]:], skip_special_tokens=True)
+        response = self.tokenizer.decode(outputs[0][inputs['input_ids'].shape[1]:], skip_special_tokens=True)
         
-        # 👇 응답 정리 (첫 문장만 사용)
+        # 👇 응답 정리
         response = response.strip()
-        sentences = response.split('.')
-        if len(sentences) > 2:
-            response = '.'.join(sentences[:2]) + '.'
+        
+        # 첫 번째 줄만 사용
+        lines = response.split('\n')
+        response = lines[0].strip()
+        
+        # 반복되는 단어/문자 제거 (중국어 반복 같은 것)
+        # 같은 단어가 3번 이상 반복되면 1번만 남김
+        response = re.sub(r'(.+?)\1{2,}', r'\1', response)
+        
+        # 이상한 문자 제거 (한글, 영문, 숫자, 기본 문장부호, 이모지만 허용)
+        response = re.sub(r'[^\w\s가-힣.,!?~😀-🙏💕✨🎉👍\-]', '', response)
+        
+        # 너무 길면 자르기
+        if len(response) > 100:
+            for delimiter in ['!', '?', '~', '.']:
+                if delimiter in response[:100]:
+                    parts = response[:100].split(delimiter)
+                    if len(parts) > 1:
+                        response = delimiter.join(parts[:-1]) + delimiter
+                        break
+        
+        # 응답 검증
+        if not response or len(response) < 2:
+            response = "죄송해요, 다시 말씀해주시겠어요?"
+        
+        # 한글이 거의 없으면 (50% 미만) 기본 응답 사용
+        korean_chars = len([c for c in response if '가' <= c <= '힣'])
+        if korean_chars < len(response) * 0.3:
+            print(f"⚠️ 한글 비율 낮음 ({korean_chars}/{len(response)}), 폴백 응답 사용")
+            response = "네! 어떤 옷을 찾으시나요? 상황이나 날씨를 알려주세요! 😊"
         
         print(f"\n🤖 LLM 응답: {response}")
         return response
@@ -435,19 +790,19 @@ class LLMRecommender:
         where_clause = " AND ".join(filters) if filters else "TRUE"
         
         query = f"""
-            SELECT DISTINCT w.item_id, w.original_image_path
+            SELECT w.item_id, w.user_id,
+                   CASE WHEN w.user_id = %s THEN 0 ELSE 1 END as user_priority
             FROM wardrobe_items w
             LEFT JOIN top_attributes t ON w.item_id = t.item_id
             LEFT JOIN bottom_attributes b ON w.item_id = b.item_id
             WHERE (w.user_id = %s OR w.is_default = TRUE)
               AND ({where_clause})
-            ORDER BY 
-                CASE WHEN w.user_id = %s THEN 0 ELSE 1 END,
-                w.item_id DESC
+            GROUP BY w.item_id, w.user_id
+            ORDER BY user_priority, w.item_id DESC
             LIMIT 6
         """
         
-        params.append(user_id)
+        params.extend([user_id, user_id])  # 2개의 %s를 위해 user_id를 2번 추가
         
         try:
             with self.db_conn.cursor() as cur:
@@ -491,6 +846,14 @@ class LLMRecommender:
             print(f"  ❌ 추천 생성 오류: {e}")
             import traceback
             traceback.print_exc()
+            
+            # 트랜잭션 롤백
+            try:
+                self.db_conn.rollback()
+                print("🔄 트랜잭션 롤백 완료")
+            except Exception as rollback_error:
+                print(f"⚠️ 롤백 실패: {rollback_error}")
+            
             return []
     
     def reset_conversation(self, user_id: int):

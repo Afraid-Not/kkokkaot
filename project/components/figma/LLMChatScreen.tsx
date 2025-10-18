@@ -19,7 +19,11 @@ import {
   Send,
   X,
   ArrowLeft,
+  Camera,
+  ImageIcon,
+  Check,
 } from 'lucide-react-native';
+import * as ImagePicker from 'expo-image-picker';
 import AppHeader from '../common/AppHeader';
 import BottomNavBar from '../common/BottomNavBar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -81,18 +85,26 @@ export default function LLMChatScreen({
   const [chatInput, setChatInput] = useState('');
   const [chatLoading, setChatLoading] = useState(false);
   const [chatRecommendations, setChatRecommendations] = useState<WardrobeItem[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [selectedItemIds, setSelectedItemIds] = useState<number[]>([]);
 
   // 사용자 ID 불러오기
   useEffect(() => {
     const loadUserId = async () => {
+      console.log('💾 사용자 정보 로딩 시작...');
       try {
         const userData = await AsyncStorage.getItem('@kko/user');
+        console.log('📦 AsyncStorage 데이터:', userData);
         if (userData) {
           const user = JSON.parse(userData);
-          setUserId(user.id);
+          console.log('👤 파싱된 사용자 정보:', user);
+          console.log('🆔 사용자 ID:', user.id || user.user_id);
+          setUserId(user.id || user.user_id);
+        } else {
+          console.log('⚠️ AsyncStorage에 사용자 정보 없음');
         }
       } catch (error) {
-        console.error('사용자 ID 로드 실패:', error);
+        console.error('❌ 사용자 ID 로드 실패:', error);
       }
     };
     loadUserId();
@@ -100,10 +112,18 @@ export default function LLMChatScreen({
 
   // 옷장 데이터 불러오기
   const fetchWardrobe = useCallback(async () => {
-    if (!userId) return;
+    console.log('👕 옷장 데이터 로딩 시작... userId:', userId);
+    if (!userId) {
+      console.log('⚠️ userId 없음 - 옷장 데이터 로드 취소');
+      return;
+    }
     
     try {
-      const response = await fetch(`${API_BASE_URL}/api/wardrobe/${userId}?include_defaults=false`);
+      const url = `${API_BASE_URL}/api/wardrobe/${userId}?include_defaults=false`;
+      console.log('📡 API 호출:', url);
+      const response = await fetch(url);
+      console.log('📥 응답 상태:', response.status);
+      
       if (response.ok) {
         const data = await response.json();
         console.log('✅ 옷장 데이터 로드 성공:', data.items.length, '개');
@@ -113,6 +133,7 @@ export default function LLMChatScreen({
           index === self.findIndex((t: WardrobeItem) => t.id === item.id)
         );
         
+        console.log('🔄 중복 제거 후:', uniqueItems.length, '개');
         setWardrobeItems(uniqueItems);
       } else {
         console.error('❌ 옷장 데이터 로드 실패:', response.status);
@@ -128,9 +149,29 @@ export default function LLMChatScreen({
     }
   }, [userId, fetchWardrobe]);
 
+  // 아이템 선택/해제 토글
+  const toggleItemSelection = (itemId: number) => {
+    setSelectedItemIds(prev => {
+      if (prev.includes(itemId)) {
+        return prev.filter(id => id !== itemId);
+      } else {
+        return [...prev, itemId];
+      }
+    });
+  };
+
   // LLM 채팅 요청
   const sendChatMessage = async () => {
-    if (!chatInput.trim() || !userId || chatLoading) return;
+    console.log('\n🚀 sendChatMessage 호출됨!');
+    console.log('📝 입력값:', chatInput);
+    console.log('👤 userId:', userId);
+    console.log('👕 선택된 아이템:', selectedItemIds);
+    console.log('⏳ chatLoading:', chatLoading);
+    
+    if (!chatInput.trim() || !userId || chatLoading) {
+      console.log('⚠️ 조건 실패 - 메시지 전송 취소');
+      return;
+    }
 
     const userMessage: ChatMessage = {
       role: 'user',
@@ -138,22 +179,29 @@ export default function LLMChatScreen({
       timestamp: new Date(),
     };
 
+    console.log('✅ 사용자 메시지 생성:', userMessage.content);
     setChatMessages(prev => [...prev, userMessage]);
     setChatInput('');
     setChatLoading(true);
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/llm-chat`, {
+      // FormData로 전송 (백엔드 요구사항)
+      const formData = new FormData();
+      formData.append('user_id', userId.toString());
+      formData.append('message', userMessage.content);
+      
+      // 선택된 아이템 ID 추가
+      if (selectedItemIds.length > 0) {
+        formData.append('selected_items', JSON.stringify(selectedItemIds));
+        console.log('✅ 선택된 아이템 포함:', selectedItemIds);
+      }
+
+      console.log('📡 API 요청 시작:', `${API_BASE_URL}/api/chat/recommend`);
+      const response = await fetch(`${API_BASE_URL}/api/chat/recommend`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          user_id: userId,
-          message: userMessage.content,
-          wardrobe_items: wardrobeItems,
-        }),
+        body: formData,
       });
+      console.log('📥 API 응답 상태:', response.status);
 
       if (response.ok) {
         const data = await response.json();
@@ -168,6 +216,11 @@ export default function LLMChatScreen({
         
         if (data.recommendations && data.recommendations.length > 0) {
           setChatRecommendations(data.recommendations);
+        }
+        
+        // 추천 완료 시 선택 초기화
+        if (data.recommendations && data.recommendations.length > 0) {
+          setSelectedItemIds([]);
         }
       } else {
         throw new Error(`HTTP ${response.status}`);
@@ -189,15 +242,185 @@ export default function LLMChatScreen({
 
   // 초기 인사 메시지
   useEffect(() => {
-    if (wardrobeItems.length > 0 && chatMessages.length === 0) {
+    console.log('💬 초기 메시지 체크...');
+    console.log('  - 옷장 아이템 수:', wardrobeItems.length);
+    console.log('  - 채팅 메시지 수:', chatMessages.length);
+    
+    if (chatMessages.length === 0 && userId) {
+      console.log('✅ 초기 인사 메시지 생성');
       const welcomeMessage: ChatMessage = {
         role: 'assistant',
-        content: `안녕하세요! 저는 당신의 패션 스타일리스트 AI입니다. 옷장에 ${wardrobeItems.length}개의 아이템이 있네요. 어떤 스타일링을 도와드릴까요?`,
+        content: wardrobeItems.length > 0 
+          ? `안녕하세요! 저는 당신의 패션 스타일리스트 AI입니다. 옷장에 ${wardrobeItems.length}개의 아이템이 있네요. 어떤 스타일링을 도와드릴까요?`
+          : `안녕하세요! 저는 당신의 패션 스타일리스트 AI입니다. 어떤 스타일링을 도와드릴까요?`,
         timestamp: new Date(),
       };
       setChatMessages([welcomeMessage]);
     }
-  }, [wardrobeItems, chatMessages.length]);
+  }, [wardrobeItems, chatMessages.length, userId]);
+
+  // 권한 요청
+  const requestPermissions = async () => {
+    if (Platform.OS === 'web') return true;
+
+    const { status: cameraStatus } = await ImagePicker.requestCameraPermissionsAsync();
+    const { status: libraryStatus } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+    if (cameraStatus !== 'granted' || libraryStatus !== 'granted') {
+      Alert.alert('권한 필요', '카메라 및 갤러리 접근 권한이 필요합니다.');
+      return false;
+    }
+    return true;
+  };
+
+  // 카메라로 촬영
+  const takePhoto = async () => {
+    const hasPermission = await requestPermissions();
+    if (!hasPermission) return;
+
+    const result = await ImagePicker.launchCameraAsync({
+      allowsEditing: true,
+      aspect: [3, 4],
+      quality: 0.8,
+    });
+
+    if (!result.canceled) {
+      uploadImage(result.assets[0].uri);
+    }
+  };
+
+  // 갤러리에서 선택
+  const pickImage = async () => {
+    const hasPermission = await requestPermissions();
+    if (!hasPermission) return;
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [3, 4],
+      quality: 0.8,
+    });
+
+    if (!result.canceled) {
+      uploadImage(result.assets[0].uri);
+    }
+  };
+
+  // 이미지 업로드
+  const uploadImage = async (imageUri: string) => {
+    if (!userId) {
+      Alert.alert('오류', '사용자 정보를 불러올 수 없습니다.');
+      return;
+    }
+
+    setUploading(true);
+    setChatLoading(true);
+
+    const uploadingMessage: ChatMessage = {
+      role: 'assistant',
+      content: '📸 사진 분석 중입니다...',
+      timestamp: new Date(),
+    };
+    setChatMessages(prev => [...prev, uploadingMessage]);
+
+    try {
+      const formData = new FormData();
+      
+      if (Platform.OS === 'web') {
+        const response = await fetch(imageUri);
+        const blob = await response.blob();
+        const file = new File([blob], 'photo.jpg', { type: 'image/jpeg' });
+        formData.append('image', file);
+      } else {
+        const filename = imageUri.split(/\\|\//).pop() || 'photo.jpg';
+        const match = /\.(\w+)$/.exec(filename);
+        const type = match ? `image/${match[1]}` : 'image/jpeg';
+
+        formData.append('image', {
+          uri: imageUri,
+          name: filename,
+          type: type,
+        } as any);
+      }
+      
+      formData.append('user_id', String(userId));
+
+      console.log('📤 이미지 업로드 시작:', `${API_BASE_URL}/api/chat/upload`);
+      
+      const uploadResponse = await fetch(`${API_BASE_URL}/api/chat/upload`, {
+        method: 'POST',
+        body: formData,
+        headers: {
+          'Accept': 'application/json',
+        },
+      });
+
+      const data = await uploadResponse.json();
+      console.log('📦 업로드 응답:', data);
+
+      // 업로드 중 메시지 제거
+      setChatMessages(prev => prev.filter(msg => msg.content !== '📸 사진 분석 중입니다...'));
+
+      if (data.success) {
+        // AI 응답 메시지
+        const aiMessage: ChatMessage = {
+          role: 'assistant',
+          content: data.message,
+          timestamp: new Date(),
+        };
+        setChatMessages(prev => [...prev, aiMessage]);
+
+        // 업로드된 아이템 카드로 표시
+        if (data.uploaded_item) {
+          setChatRecommendations([data.uploaded_item]);
+        }
+
+        // 옷장 갱신
+        fetchWardrobe();
+      } else {
+        const errorMessage: ChatMessage = {
+          role: 'assistant',
+          content: data.message || '업로드에 실패했습니다.',
+          timestamp: new Date(),
+        };
+        setChatMessages(prev => [...prev, errorMessage]);
+      }
+    } catch (error) {
+      console.error('❌ 업로드 실패:', error);
+      
+      // 업로드 중 메시지 제거
+      setChatMessages(prev => prev.filter(msg => msg.content !== '📸 사진 분석 중입니다...'));
+      
+      const errorMessage: ChatMessage = {
+        role: 'assistant',
+        content: '업로드 중 오류가 발생했습니다. 다시 시도해주세요.',
+        timestamp: new Date(),
+      };
+      setChatMessages(prev => [...prev, errorMessage]);
+    } finally {
+      setUploading(false);
+      setChatLoading(false);
+    }
+  };
+
+  // 이미지 선택 옵션
+  const showImageOptions = () => {
+    if (uploading) return;
+
+    if (Platform.OS === 'web') {
+      pickImage();
+    } else {
+      Alert.alert(
+        '사진 추가',
+        '어떻게 추가하시겠어요?',
+        [
+          { text: '📸 카메라로 촬영', onPress: takePhoto },
+          { text: '🖼️ 갤러리에서 선택', onPress: pickImage },
+          { text: '취소', style: 'cancel' },
+        ]
+      );
+    }
+  };
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -213,14 +436,15 @@ export default function LLMChatScreen({
       
       <KeyboardAvoidingView 
         style={styles.container}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+        behavior="padding"
+        keyboardVerticalOffset={-60}
       >
         {/* 채팅 메시지 영역 */}
         <ScrollView 
           style={styles.chatArea}
           contentContainerStyle={styles.chatContent}
           showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
         >
           {chatMessages.map((message, index) => (
             <View
@@ -255,20 +479,49 @@ export default function LLMChatScreen({
           )}
         </ScrollView>
 
-        {/* 채팅 추천 아이템 */}
+        {/* 옷장 아이템 */}
         {chatRecommendations.length > 0 && (
           <View style={styles.recommendationsContainer}>
-            <Text style={styles.recommendationsTitle}>추천 아이템</Text>
+            <View style={styles.recommendationsHeader}>
+              <Text style={styles.recommendationsTitle}>내 옷장 👗</Text>
+              <Pressable 
+                style={styles.closeButton}
+                onPress={() => setChatRecommendations([])}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <X size={18} color="#6B7280" />
+              </Pressable>
+            </View>
             <ScrollView horizontal showsHorizontalScrollIndicator={false}>
               <View style={styles.recommendationsList}>
-                {chatRecommendations.map((item) => (
-                  <Pressable key={item.id} style={styles.recommendationCard}>
-                    <Image source={{ uri: item.image }} style={styles.recommendationImage} />
-                    <Text style={styles.recommendationName} numberOfLines={2}>
-                      {item.name}
-                    </Text>
-                  </Pressable>
-                ))}
+                {chatRecommendations.map((item) => {
+                  const isSelected = selectedItemIds.includes(item.id);
+                  return (
+                    <Pressable 
+                      key={item.id} 
+                      style={[
+                        styles.recommendationCard,
+                        isSelected && styles.recommendationCardSelected
+                      ]}
+                      onPress={() => toggleItemSelection(item.id)}
+                    >
+                      <Image 
+                        source={{ uri: `${API_BASE_URL}${item.image}` }} 
+                        style={styles.recommendationImage}
+                        onError={(e) => console.error('❌ LLM 이미지 로드 실패:', `${API_BASE_URL}${item.image}`, e.nativeEvent.error)}
+                        onLoad={() => console.log('✅ LLM 이미지 로드 성공:', `${API_BASE_URL}${item.image}`)}
+                      />
+                      {isSelected && (
+                        <View style={styles.selectedBadge}>
+                          <Check size={16} color="#FFF" />
+                        </View>
+                      )}
+                      <Text style={styles.recommendationName} numberOfLines={2}>
+                        {item.name}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
               </View>
             </ScrollView>
           </View>
@@ -276,6 +529,18 @@ export default function LLMChatScreen({
 
         {/* 입력 영역 */}
         <View style={styles.inputContainer}>
+          <Pressable
+            style={[styles.imageButton, uploading && styles.imageButtonDisabled]}
+            onPress={showImageOptions}
+            disabled={uploading}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            {uploading ? (
+              <ActivityIndicator size="small" color="#6B7280" />
+            ) : (
+              <Camera size={20} color="#6B7280" />
+            )}
+          </Pressable>
           <TextInput
             style={styles.textInput}
             placeholder="AI에게 패션 조언을 요청해보세요..."
@@ -284,11 +549,16 @@ export default function LLMChatScreen({
             multiline
             maxLength={500}
             placeholderTextColor="#9CA3AF"
+            editable={!uploading}
           />
           <Pressable
-            style={[styles.sendButton, (!chatInput.trim() || chatLoading) && styles.sendButtonDisabled]}
-            onPress={sendChatMessage}
-            disabled={!chatInput.trim() || chatLoading}
+            style={[styles.sendButton, (!chatInput.trim() || chatLoading || uploading) && styles.sendButtonDisabled]}
+            onPress={() => {
+              console.log('🔘 보내기 버튼 클릭됨!');
+              sendChatMessage();
+            }}
+            disabled={!chatInput.trim() || chatLoading || uploading}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           >
             {chatLoading ? (
               <ActivityIndicator size="small" color="#FFF" />
@@ -321,7 +591,8 @@ const styles = StyleSheet.create({
     marginTop: 16,
   },
   chatContent: {
-    paddingBottom: 16,
+    paddingBottom: 24,
+    paddingTop: 8,
   },
   messageContainer: {
     marginVertical: 4,
@@ -365,15 +636,28 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFF',
     borderRadius: 12,
     padding: 16,
-    marginBottom: 16,
+    marginBottom: 12,
     borderWidth: 1,
     borderColor: '#E5E7EB',
+  },
+  recommendationsHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
   },
   recommendationsTitle: {
     fontSize: 16,
     fontWeight: '600',
     color: '#111',
-    marginBottom: 12,
+  },
+  closeButton: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#F3F4F6',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   recommendationsList: {
     flexDirection: 'row',
@@ -382,12 +666,31 @@ const styles = StyleSheet.create({
   recommendationCard: {
     width: 80,
     alignItems: 'center',
+    position: 'relative',
+  },
+  recommendationCardSelected: {
+    transform: [{ scale: 0.95 }],
   },
   recommendationImage: {
     width: 80,
     height: 100,
     borderRadius: 8,
     backgroundColor: '#F3F4F6',
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  selectedBadge: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#111',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#FFF',
   },
   recommendationName: {
     fontSize: 12,
@@ -398,15 +701,27 @@ const styles = StyleSheet.create({
   },
   inputContainer: {
     flexDirection: 'row',
-    alignItems: 'flex-end',
+    alignItems: 'center',
     backgroundColor: '#FFF',
     borderRadius: 24,
     paddingHorizontal: 16,
     paddingVertical: 12,
-    marginBottom: 16,
+    marginBottom: BOTTOM_NAV_HEIGHT + 8, // 네비게이션 바 위에 배치
     borderWidth: 1,
     borderColor: '#E5E7EB',
     gap: 12,
+  },
+  imageButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F3F4F6',
+    flexShrink: 0,
+  },
+  imageButtonDisabled: {
+    opacity: 0.5,
   },
   textInput: {
     flex: 1,
@@ -416,12 +731,18 @@ const styles = StyleSheet.create({
     minHeight: 20,
   },
   sendButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: '#111',
     alignItems: 'center',
     justifyContent: 'center',
+    flexShrink: 0, // 버튼이 줄어들지 않도록
+    elevation: 2, // 안드로이드 그림자
+    shadowColor: '#000', // iOS 그림자
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
   },
   sendButtonDisabled: {
     backgroundColor: '#D1D5DB',
