@@ -15,7 +15,8 @@
       "permissions": ["POST_NOTIFICATIONS"],
       "notification": {
         "channel": "default"
-      }
+      },
+      "softwareKeyboardLayoutMode": "pan"
     },
     "extra": {
       "eas": {
