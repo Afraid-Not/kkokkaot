@@ -18,6 +18,7 @@ import SettingsScreen from './components/figma/SettingsScreen';
 import NotificationsScreen from './components/figma/NotificationsScreen';
 import SupportScreen from './components/figma/SupportScreen';
 import LLMChatScreen from './components/figma/LLMChatScreen';
+import VirtualFittingScreen from './components/figma/VirtualFittingScreen';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export type MainScreen =
@@ -51,7 +52,7 @@ export default function App() {
   const navigate = (target: MainScreen) => {
     // 'daily-outfit'은 이제 분석 화면으로 사용됩니다.
     // BottomNavBar에서 'Analysis'를 누르면 'daily-outfit'으로 이동합니다.
-    if (Platform.OS === 'web' && (target === 'virtual-fitting' || target === 'recent-styling' || target === 'blocked-outfits')) {
+    if (Platform.OS === 'web' && (target === 'recent-styling' || target === 'blocked-outfits')) {
         Alert.alert("준비중", "해당 기능은 현재 준비중입니다.");
         return;
     }
@@ -152,6 +153,8 @@ export default function App() {
           return <SupportScreen onBack={() => navigate('home')} />;
         case 'llm-chat':
           return <LLMChatScreen onBack={() => navigate('home')} onNavigate={navigate} />;
+        case 'virtual-fitting':
+          return <VirtualFittingScreen onBack={() => navigate('home')} onNavigate={navigate} />;
         default:
           return <HomeScreen userName={userName} onNavigate={navigate} onLogout={handleLogout} />;
       }
