@@ -1,3 +1,13 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+새로운 메인 파이프라인
+1. 전체 이미지 스타일 예측 (22개 스타일)
+2. YOLO로 상의/하의/아우터/드레스 크롭 (confidence 0.5 이상)
+3. 크롭된 이미지별 카테고리 속성 예측
+4. 데이터베이스 저장 및 ChromaDB 임베딩
+"""
+
 import cv2
 import numpy as np
 import torch
@@ -13,29 +23,21 @@ from psycopg2.extras import Json
 import json
 import pandas as pd
 from typing import Dict, Tuple, Optional, List
-
-# Background Remover 관련 import
-try:
-    from rembg import remove, new_session
-    REMBG_AVAILABLE = True
-except ImportError:
-    print("⚠️ rembg가 설치되지 않았습니다. Background Remover 기능을 사용할 수 없습니다.")
-    REMBG_AVAILABLE = False
+import warnings
+warnings.filterwarnings('ignore')
 
 # GPU 설정
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"사용 디바이스: {DEVICE}")
 
-
-class FashionPipeline:
-    """가상옷장 전체 파이프라인 (업데이트된 버전)"""
+class NewFashionPipeline:
+    """새로운 패션 파이프라인"""
     
     def __init__(self, 
                 style_model_path: str = "D:/kkokkaot/API/pre_trained_weights/k_fashion_best_model.pth",
                 yolo_detection_path: str = "D:/kkokkaot/API/pre_trained_weights/yolo_best.pt",
                 category_models_dir: str = "D:/kkokkaot/API/pre_trained_weights/category_attributes",
                 schema_path: str = "D:/kkokkaot/API/kfashion_attributes_schema.csv",
-                yolo_pose_path: str = None,  # 기존 호환성을 위해 유지
                 chroma_path: str = "./chroma_db",
                 db_config: dict = None):
         """초기화"""
@@ -58,53 +60,20 @@ class FashionPipeline:
         print("4. 속성 스키마 로드...")
         self.schema = self.load_schema(schema_path)
         
-        # 5. YOLO Pose 모델 (선택적, 기존 호환성을 위해)
-        if yolo_pose_path:
-            print("5. YOLO Pose 로드...")
-            self.yolo_model = YOLO(yolo_pose_path)
-        else:
-            print("5. YOLO Pose 건너뛰기...")
-            self.yolo_model = None
-        
-        # 6. Background Remover (누끼따기)
-        if REMBG_AVAILABLE:
-            print("6. Background Remover 초기화...")
-            try:
-                # Background Remover 세션 초기화 (u2net 모델 사용)
-                self.rembg_session = new_session('u2net')
-                self.rembg_available = True
-                print("✅ Background Remover 초기화 완료!")
-            except Exception as e:
-                print(f"⚠️ Background Remover 초기화 실패: {e}")
-                self.rembg_session = None
-                self.rembg_available = False
-        else:
-            print("6. Background Remover 건너뛰기...")
-            self.rembg_session = None
-            self.rembg_available = False
-        
-        # 이미지 전처리
-        self.transform = transforms.Compose([
-            transforms.Resize((224, 224)),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], 
-                               std=[0.229, 0.224, 0.225])
-        ])
-        
-        # 7. CLIP 모델 (임베딩용)
-        print("7. CLIP 모델 로드...")
+        # 5. CLIP 모델 (임베딩용)
+        print("5. CLIP 모델 로드...")
         self.clip_model, self.clip_processor = self.load_clip_model()
         
-        # 8. ChromaDB
-        print("8. ChromaDB 연결...")
+        # 6. ChromaDB
+        print("6. ChromaDB 연결...")
         self.chroma_client = chromadb.PersistentClient(path=chroma_path)
         try:
             self.chroma_collection = self.chroma_client.get_collection(name="fashion_collection")
         except:
             self.chroma_collection = self.chroma_client.create_collection(name="fashion_collection")
         
-        # 9. PostgreSQL
-        print("9. PostgreSQL 연결...")
+        # 7. PostgreSQL
+        print("7. PostgreSQL 연결...")
         if db_config is None:
             db_config = {
                 'host': 'localhost',
@@ -115,6 +84,13 @@ class FashionPipeline:
             }
         self.db_config = db_config
         self.db_conn = psycopg2.connect(**db_config)
+        
+        # 이미지 전처리
+        self.transform = transforms.Compose([
+            transforms.Resize((224, 224)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        ])
         
         print("\n✓ 모든 모델 로드 완료\n")
     
@@ -237,60 +213,6 @@ class FashionPipeline:
         print(f"  - 스타일: {style} ({confidence:.2f})")
         return result
     
-    def predict_category_attributes(self, category: str, cropped_image: np.ndarray) -> Dict:
-        """특정 카테고리의 속성 예측"""
-        print(f"  [3/7] {category} 속성 예측 중...")
-        
-        if category not in self.category_models:
-            return {}
-        
-        # PIL 이미지로 변환
-        pil_image = Image.fromarray(cropped_image)
-        image_tensor = self.transform(pil_image).unsqueeze(0).to(DEVICE)
-        
-        attributes = {}
-        
-        # 각 속성별 예측
-        for attribute, model_info in self.category_models[category].items():
-            try:
-                model = model_info['model']
-                class_names = model_info['class_names']
-                
-                with torch.no_grad():
-                    outputs = model(image_tensor)
-                    probs = torch.softmax(outputs, dim=1)[0]
-                    pred_idx = probs.argmax().item()
-                    confidence = probs[pred_idx].item()
-                    predicted_class = class_names[pred_idx]
-                    
-                    attributes[attribute] = {
-                        'value': predicted_class,
-                        'confidence': confidence
-                    }
-                    
-                    print(f"    - {attribute}: {predicted_class} ({confidence:.2f})")
-                    
-            except Exception as e:
-                print(f"    ❌ {category}_{attribute} 예측 실패: {e}")
-                continue
-        
-        return attributes
-    
-    def reconnect_db(self):
-        """데이터베이스 연결 재시도"""
-        try:
-            if hasattr(self, 'db_conn') and self.db_conn:
-                self.db_conn.close()
-        except:
-            pass
-        
-        try:
-            self.db_conn = psycopg2.connect(**self.db_config)
-            print("✅ 데이터베이스 재연결 성공")
-        except Exception as e:
-            print(f"❌ 데이터베이스 재연결 실패: {e}")
-            raise
-    
     def detect_and_crop_categories(self, image_path: str) -> Dict:
         """YOLO로 카테고리 감지 및 크롭"""
         print("[2/7] YOLO 카테고리 감지 및 크롭 중...")
@@ -364,8 +286,45 @@ class FashionPipeline:
             'has_아우터': '아우터' in final_items,
             'has_원피스': '원피스' in final_items
         }
-
     
+    def predict_category_attributes(self, category: str, cropped_image: np.ndarray) -> Dict:
+        """특정 카테고리의 속성 예측"""
+        print(f"  [3/7] {category} 속성 예측 중...")
+        
+        if category not in self.category_models:
+            return {}
+        
+        # PIL 이미지로 변환
+        pil_image = Image.fromarray(cropped_image)
+        image_tensor = self.transform(pil_image).unsqueeze(0).to(DEVICE)
+        
+        attributes = {}
+        
+        # 각 속성별 예측
+        for attribute, model_info in self.category_models[category].items():
+            try:
+                model = model_info['model']
+                class_names = model_info['class_names']
+                
+                with torch.no_grad():
+                    outputs = model(image_tensor)
+                    probs = torch.softmax(outputs, dim=1)[0]
+                    pred_idx = probs.argmax().item()
+                    confidence = probs[pred_idx].item()
+                    predicted_class = class_names[pred_idx]
+                    
+                    attributes[attribute] = {
+                        'value': predicted_class,
+                        'confidence': confidence
+                    }
+                    
+                    print(f"    - {attribute}: {predicted_class} ({confidence:.2f})")
+                    
+            except Exception as e:
+                print(f"    ❌ {category}_{attribute} 예측 실패: {e}")
+                continue
+        
+        return attributes
     
     def create_embedding(self, image: np.ndarray) -> np.ndarray:
         """이미지 임베딩 생성"""
@@ -387,7 +346,6 @@ class FashionPipeline:
         print(f"  - 임베딩 차원: {embedding.shape}")
         
         return embedding
-    
     
     def save_to_postgresql(self, user_id: int, image_path: str, 
                           style_result: Dict, detection_result: Dict,
@@ -470,7 +428,6 @@ class FashionPipeline:
                 print(f"  ❌ PostgreSQL 저장 실패: {e}")
             raise e
     
-    
     def save_to_chromadb(self, item_id: int, embedding: np.ndarray, 
                         metadata: Dict) -> str:
         """ChromaDB에 저장"""
@@ -499,7 +456,6 @@ class FashionPipeline:
         print(f"  - Chroma ID: {chroma_id}")
         return chroma_id
     
-    
     def search_similar(self, embedding: np.ndarray, n_results: int = 5) -> list:
         """유사 아이템 검색"""
         print(f"[7/7] 유사 아이템 검색 중 (Top {n_results})...")
@@ -512,44 +468,10 @@ class FashionPipeline:
         print(f"  - 검색 완료: {len(results['ids'][0])}개")
         return results
     
-    def remove_background_with_rembg(self, image: np.ndarray) -> np.ndarray:
-        """
-        Background Remover를 사용하여 배경 제거
-        
-        Args:
-            image: 입력 이미지 (RGB)
-        
-        Returns:
-            transparent_image: 투명 배경 이미지 (RGBA)
-        """
-        if not self.rembg_available:
-            print("⚠️ Background Remover가 사용 불가능합니다.")
-            return None
-        
-        try:
-            # PIL Image로 변환
-            pil_image = Image.fromarray(image)
-            
-            # Background Remover로 배경 제거
-            transparent_image = remove(pil_image, session=self.rembg_session)
-            
-            # numpy array로 변환
-            transparent_array = np.array(transparent_image)
-            
-            return transparent_array
-            
-        except Exception as e:
-            print(f"❌ Background Remover 처리 실패: {e}")
-            return None
-    
-    
-    
-    def process_image(self, image_path: str, user_id: int, 
-                    save_separated_images: bool = False) -> Dict:
+    def process_image(self, image_path: str, user_id: int) -> Dict:
         """전체 파이프라인 실행"""
-        
         print(f"\n{'='*60}")
-        print(f"파이프라인 시작: {image_path}")
+        print(f"새로운 패션 파이프라인 시작: {image_path}")
         print(f"{'='*60}\n")
         
         try:
@@ -607,40 +529,6 @@ class FashionPipeline:
             # 9. 유사 아이템 검색
             similar_items = self.search_similar(embedding, n_results=5)
             
-            # 10. 분리된 이미지 저장 (기존 호환성 유지)
-            if save_separated_images:
-                base_dir = Path("./processed_images") / f"user_{user_id}"
-                folders = {
-                    'full': base_dir / 'full',
-                    'top': base_dir / 'top',
-                    'bottom': base_dir / 'bottom',
-                    'outer': base_dir / 'outer',
-                    'dress': base_dir / 'dress'
-                }
-                
-                for folder in folders.values():
-                    folder.mkdir(parents=True, exist_ok=True)
-                
-                # 전체 이미지 저장
-                full_path = folders['full'] / f"item_{item_id}_full.jpg"
-                Image.fromarray(detection_result['original']).save(full_path)
-                print(f"  ✅ 전체 이미지 저장: {full_path}")
-                
-                # 각 카테고리별 이미지 저장
-                category_mapping = {
-                    '상의': 'top',
-                    '하의': 'bottom', 
-                    '아우터': 'outer',
-                    '원피스': 'dress'
-                }
-                
-                for category_ko, category_en in category_mapping.items():
-                    if category_ko in detection_result['detected_items']:
-                        image_path_save = folders[category_en] / f"item_{item_id}_{category_en}.jpg"
-                        Image.fromarray(detection_result['detected_items'][category_ko]['cropped_image']).save(image_path_save)
-                        print(f"  ✅ {category_ko} 저장: {image_path_save}")
-                
-            
             print(f"\n{'='*60}")
             print(f"✔ 파이프라인 완료!")
             print(f"  - 아이템 ID: {item_id}")
@@ -673,7 +561,6 @@ class FashionPipeline:
             import traceback
             traceback.print_exc()
             
-            # ✅ 트랜잭션 rollback (추가)
             try:
                 if hasattr(self, 'db_conn') and self.db_conn:
                     self.db_conn.rollback()
@@ -685,94 +572,77 @@ class FashionPipeline:
                 'error': str(e)
             }
     
-    def get_similar_items(self, image_path: str, n_results: int = 5) -> list:
-        """주어진 이미지와 유사한 아이템을 검색"""
+    def get_image_info(self, item_id: int) -> Dict:
+        """이미지 정보 조회 (전체 이미지용)"""
         try:
-            # 1. 이미지 임베딩 생성
-            image = cv2.imread(image_path)
-            if image is None:
-                raise ValueError(f"이미지를 찾을 수 없습니다: {image_path}")
-            
-            image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-            embedding = self.create_embedding(image_rgb)
-            
-            # 2. ChromaDB에서 유사 아이템 검색
-            search_results = self.search_similar(embedding, n_results)
-            
-            # 3. 결과 정리
-            item_ids = [int(id.replace("item_", "")) for id in search_results['ids'][0]]
-            distances = search_results['distances'][0]
-            
-            results = []
-            for i, item_id in enumerate(item_ids):
-                results.append({
-                    'item_id': item_id,
-                    'distance': distances[i]
-                })
+            with self.db_conn.cursor() as cur:
+                cur.execute("""
+                    SELECT item_id, original_image_path, style, style_confidence,
+                           has_top, has_bottom, has_outer, has_dress
+                    FROM wardrobe_items 
+                    WHERE item_id = %s
+                """, (item_id,))
                 
-            return results
-        
+                result = cur.fetchone()
+                if result:
+                    return {
+                        'item_id': result[0],
+                        'image_path': result[1],
+                        'style': result[2],
+                        'style_confidence': result[3],
+                        'has_top': result[4],
+                        'has_bottom': result[5],
+                        'has_outer': result[6],
+                        'has_dress': result[7]
+                    }
+                else:
+                    return None
+                    
         except Exception as e:
-            print(f"❌ 유사 아이템 검색 중 오류 발생: {e}")
-            import traceback
-            traceback.print_exc()
-            return []
+            print(f"❌ 이미지 정보 조회 실패: {e}")
+            return None
+    
+    def get_category_info(self, item_id: int, category: str) -> Dict:
+        """카테고리별 속성 정보 조회 (크롭된 이미지용)"""
+        try:
+            table_name = f"{category.lower()}_attributes"
+            
+            with self.db_conn.cursor() as cur:
+                cur.execute(f"""
+                    SELECT category, color, fit, material, length,
+                           sleeve_length, neckline, print_pattern,
+                           category_confidence, color_confidence, fit_confidence
+                    FROM {table_name} 
+                    WHERE item_id = %s
+                """, (item_id,))
+                
+                result = cur.fetchone()
+                if result:
+                    return {
+                        'category': result[0],
+                        'color': result[1],
+                        'fit': result[2],
+                        'material': result[3],
+                        'length': result[4],
+                        'sleeve_length': result[5],
+                        'neckline': result[6],
+                        'print_pattern': result[7],
+                        'category_confidence': result[8],
+                        'color_confidence': result[9],
+                        'fit_confidence': result[10]
+                    }
+                else:
+                    return None
+                    
+        except Exception as e:
+            print(f"❌ {category} 정보 조회 실패: {e}")
+            return None
     
     def close(self):
         """연결 종료"""
         if self.db_conn:
             self.db_conn.close()
             print("PostgreSQL 연결 종료")
-
-
-# MultiTaskFashionModel 정의
-class MultiTaskFashionModel(nn.Module):
-    """Multi-task 패션 속성 예측 모델"""
-    
-    def __init__(self, num_categories, num_colors, num_fits, num_materials):
-        super().__init__()
-        
-        self.backbone = models.efficientnet_b0(weights='IMAGENET1K_V1')
-        num_features = self.backbone.classifier[1].in_features
-        self.backbone.classifier = nn.Identity()
-        
-        self.category_head = nn.Sequential(
-            nn.Linear(num_features, 512),
-            nn.ReLU(),
-            nn.Dropout(0.3),
-            nn.Linear(512, num_categories)
-        )
-        
-        self.color_head = nn.Sequential(
-            nn.Linear(num_features, 256),
-            nn.ReLU(),
-            nn.Dropout(0.3),
-            nn.Linear(256, num_colors)
-        )
-        
-        self.fit_head = nn.Sequential(
-            nn.Linear(num_features, 128),
-            nn.ReLU(),
-            nn.Dropout(0.3),
-            nn.Linear(128, num_fits)
-        )
-        
-        self.material_head = nn.Sequential(
-            nn.Linear(num_features, 256),
-            nn.ReLU(),
-            nn.Dropout(0.3),
-            nn.Linear(256, num_materials)
-        )
-    
-    def forward(self, x):
-        features = self.backbone(x)
-        
-        category_out = self.category_head(features)
-        color_out = self.color_head(features)
-        fit_out = self.fit_head(features)
-        material_out = self.material_head(features)
-        
-        return category_out, color_out, fit_out, material_out
 
 
 class CategoryAttributeCNN(nn.Module):
@@ -803,3 +673,28 @@ class CategoryAttributeCNN(nn.Module):
         features = self.backbone(x)
         output = self.classifier(features)
         return output
+
+
+def main():
+    """테스트용 메인 함수"""
+    print("🎯 새로운 패션 파이프라인 테스트")
+    
+    # 파이프라인 초기화
+    pipeline = NewFashionPipeline()
+    
+    # 테스트 이미지 처리
+    test_image_path = "test_image.jpg"  # 실제 이미지 경로로 변경
+    user_id = 1
+    
+    result = pipeline.process_image(test_image_path, user_id)
+    
+    if result['success']:
+        print("✅ 파이프라인 실행 성공!")
+    else:
+        print("❌ 파이프라인 실행 실패!")
+    
+    pipeline.close()
+
+
+if __name__ == "__main__":
+    main()
