@@ -230,6 +230,77 @@ class DataPreparation:
         
         return mapping_file
     
+    def sync_labels_with_images(self):
+        """크롭된 이미지와 CNN 라벨 동기화"""
+        print("\n🔄 CNN 라벨과 크롭 이미지 동기화 중...")
+        
+        categories = ['상의', '하의', '아우터', '원피스']
+        removed_counts = {cat: 0 for cat in categories}
+        
+        for category in categories:
+            # 크롭된 이미지 ID 수집
+            cropped_images_dir = self.output_dir / "cropped_images" / category
+            cropped_image_ids = set()
+            
+            if cropped_images_dir.exists():
+                for img_file in cropped_images_dir.glob("*.jpg"):
+                    # 파일명 형식: imageID_category_sequence.jpg
+                    filename = img_file.stem
+                    parts = filename.split('_')
+                    if len(parts) >= 2:
+                        image_id = parts[0]
+                        cropped_image_ids.add(image_id)
+            
+            # CNN 라벨 파일 확인 및 제거
+            cnn_labels_dir = self.output_dir / "cnn_labels" / category
+            
+            if cnn_labels_dir.exists():
+                for label_file in cnn_labels_dir.glob("*.json"):
+                    try:
+                        with open(label_file, 'r', encoding='utf-8') as f:
+                            data = json.load(f)
+                        
+                        image_id = str(data.get('image_id'))
+                        
+                        # 크롭된 이미지가 없으면 라벨 파일 삭제
+                        if image_id not in cropped_image_ids:
+                            label_file.unlink()
+                            removed_counts[category] += 1
+                            
+                    except Exception as e:
+                        print(f"⚠️ 라벨 파일 처리 오류 {label_file}: {e}")
+                        continue
+        
+        print("동기화 완료:")
+        for category, count in removed_counts.items():
+            print(f"  {category}: {count}개 라벨 파일 제거")
+        
+        return removed_counts
+    
+    def count_final_data(self):
+        """최종 데이터 개수 확인"""
+        categories = ['상의', '하의', '아우터', '원피스']
+        
+        final_cnn_counts = {}
+        final_image_counts = {}
+        
+        for category in categories:
+            # CNN 라벨 개수
+            cnn_labels_dir = self.output_dir / "cnn_labels" / category
+            if cnn_labels_dir.exists():
+                final_cnn_counts[category] = len(list(cnn_labels_dir.glob("*.json")))
+            else:
+                final_cnn_counts[category] = 0
+            
+            # 크롭 이미지 개수
+            cropped_images_dir = self.output_dir / "cropped_images" / category
+            if cropped_images_dir.exists():
+                final_image_counts[category] = len(list(cropped_images_dir.glob("*.jpg")))
+            else:
+                final_image_counts[category] = 0
+        
+        return final_cnn_counts, final_image_counts
+    
     def run_preparation(self):
         """전체 데이터 준비 프로세스 실행"""
         print("🚀 데이터 준비 시작!")
@@ -242,10 +313,16 @@ class DataPreparation:
             # 2. 이미지 크롭
             image_counts, processed_images = self.prepare_cropped_images()
             
-            # 3. 매핑 파일 생성
-            mapping_file = self.create_mapping_file(cnn_counts, image_counts, processed_images)
+            # 3. CNN 라벨과 크롭 이미지 동기화
+            removed_counts = self.sync_labels_with_images()
             
-            # 4. 결과 요약
+            # 4. 최종 데이터 개수 확인
+            final_cnn_counts, final_image_counts = self.count_final_data()
+            
+            # 5. 매핑 파일 생성
+            mapping_file = self.create_mapping_file(final_cnn_counts, final_image_counts, processed_images)
+            
+            # 6. 결과 요약
             print(f"\n{'='*60}")
             print("📊 데이터 준비 완료!")
             print(f"{'='*60}")
@@ -254,12 +331,29 @@ class DataPreparation:
             print(f"📄 매핑 파일: {mapping_file}")
             print(f"🖼️ 처리된 이미지: {processed_images}개")
             
-            print("\n📊 카테고리별 결과:")
+            print("\n📊 초기 데이터:")
             print("-" * 40)
             for category in ['상의', '하의', '아우터', '원피스']:
                 cnn_count = cnn_counts.get(category, 0)
                 img_count = image_counts.get(category, 0)
                 print(f"{category:8s}: CNN 라벨 {cnn_count:4d}개, 크롭 이미지 {img_count:4d}개")
+            
+            print("\n📊 동기화 후 최종 데이터:")
+            print("-" * 40)
+            for category in ['상의', '하의', '아우터', '원피스']:
+                final_cnn = final_cnn_counts.get(category, 0)
+                final_img = final_image_counts.get(category, 0)
+                removed = removed_counts.get(category, 0)
+                match_status = "✅" if final_cnn == final_img else "❌"
+                print(f"{category:8s}: CNN 라벨 {final_cnn:4d}개, 크롭 이미지 {final_img:4d}개 {match_status} (제거: {removed}개)")
+            
+            # 검증
+            all_matched = all(final_cnn_counts[cat] == final_image_counts[cat] for cat in ['상의', '하의', '아우터', '원피스'])
+            
+            if all_matched:
+                print(f"\n✅ 모든 카테고리의 CNN 라벨과 크롭 이미지 수가 일치합니다!")
+            else:
+                print(f"\n⚠️ 일부 카테고리에서 수가 일치하지 않습니다.")
             
             print(f"\n🎉 모든 작업이 완료되었습니다!")
             
