@@ -119,16 +119,28 @@ class CategoryAttributeTrainer:
             return None, None
         
         # CNN 라벨 파일들 로드
+        print("  📂 CNN 라벨 파일 스캔 중...")
         cnn_files = list(category_cnn_dir.glob("*.json"))
         print(f"📊 {category} CNN 라벨 파일: {len(cnn_files)}개")
         
         # 이미지 파일들 확인
+        print("  🖼️ 크롭 이미지 파일 스캔 중...")
         image_files = list(category_images_dir.glob("*.jpg"))
         print(f"📊 {category} 크롭 이미지: {len(image_files)}개")
         
-        # 데이터 매칭
+        # 데이터 매칭 - 정확한 파일명 매칭 (최적화)
+        print("  🔄 파일 매칭 중...")
+        
+        # 이미지 파일명을 딕셔너리로 변환하여 빠른 검색
+        image_dict = {img.stem: img for img in image_files}
+        print(f"  📝 이미지 딕셔너리 생성 완료: {len(image_dict)}개")
+        
         valid_data = []
-        for cnn_file in cnn_files:
+        unmatched_count = 0
+        
+        # 진행바 추가
+        cnn_pbar = tqdm(cnn_files, desc="  📂 CNN 파일 매칭", ncols=100)
+        for cnn_file in cnn_pbar:
             try:
                 with open(cnn_file, 'r', encoding='utf-8') as f:
                     cnn_data = json.load(f)
@@ -136,14 +148,27 @@ class CategoryAttributeTrainer:
                 image_id = cnn_data['image_id']
                 item_data = cnn_data['item_data']
                 
-                # 해당 이미지 ID로 시작하는 이미지 파일들 찾기
-                matching_images = [img for img in image_files if img.stem.startswith(f"{image_id}_")]
+                # CNN 파일명에서 정확한 매칭 이미지 찾기 (딕셔너리 사용)
+                cnn_stem = cnn_file.stem  # 예: "1110355_상의_001"
+                matching_image = image_dict.get(cnn_stem)
                 
-                for image_path in matching_images:
+                # 매칭되는 이미지가 있으면 추가
+                if matching_image:
                     valid_data.append({
-                        'image_path': str(image_path),
+                        'image_path': str(matching_image),
                         'item_data': item_data
                     })
+                else:
+                    unmatched_count += 1
+                    # 매칭되지 않는 파일 로그 (처음 5개만)
+                    if unmatched_count <= 5:
+                        print(f"  ⚠️ 매칭 이미지 없음: {cnn_stem}")
+                
+                # 진행바 업데이트
+                cnn_pbar.set_postfix({
+                    '매칭됨': len(valid_data),
+                    '누락': unmatched_count
+                })
                     
             except Exception as e:
                 print(f"⚠️ CNN 파일 처리 오류 {cnn_file}: {e}")
@@ -267,13 +292,16 @@ class CategoryAttributeTrainer:
         patience_counter = 0
         
         for epoch in range(epochs):
+            print(f"\n    📚 Epoch {epoch+1}/{epochs} 시작")
+            
             # 학습 단계
             model.train()
             train_loss = 0.0
             train_correct = 0
             train_total = 0
             
-            for images, labels in tqdm(train_loader, desc=f"Epoch {epoch+1}/{epochs}", leave=False):
+            train_pbar = tqdm(train_loader, desc=f"  🏃 학습 중", leave=True, ncols=100)
+            for batch_idx, (images, labels) in enumerate(train_pbar):
                 images, labels = images.to(DEVICE), labels.to(DEVICE)
                 
                 optimizer.zero_grad()
@@ -286,6 +314,13 @@ class CategoryAttributeTrainer:
                 _, predicted = torch.max(outputs.data, 1)
                 train_total += labels.size(0)
                 train_correct += (predicted == labels).sum().item()
+                
+                # 진행바 업데이트
+                current_acc = 100 * train_correct / train_total
+                train_pbar.set_postfix({
+                    'Loss': f'{loss.item():.4f}',
+                    'Acc': f'{current_acc:.2f}%'
+                })
             
             # 검증 단계
             model.eval()
@@ -293,8 +328,9 @@ class CategoryAttributeTrainer:
             val_correct = 0
             val_total = 0
             
+            val_pbar = tqdm(test_loader, desc=f"  🔍 검증 중", leave=False, ncols=100)
             with torch.no_grad():
-                for images, labels in test_loader:
+                for images, labels in val_pbar:
                     images, labels = images.to(DEVICE), labels.to(DEVICE)
                     outputs = model(images)
                     loss = criterion(outputs, labels)
@@ -303,6 +339,13 @@ class CategoryAttributeTrainer:
                     _, predicted = torch.max(outputs.data, 1)
                     val_total += labels.size(0)
                     val_correct += (predicted == labels).sum().item()
+                    
+                    # 검증 진행바 업데이트
+                    current_val_acc = 100 * val_correct / val_total if val_total > 0 else 0
+                    val_pbar.set_postfix({
+                        'Val_Loss': f'{loss.item():.4f}',
+                        'Val_Acc': f'{current_val_acc:.2f}%'
+                    })
             
             # 통계 계산
             train_loss /= len(train_loader)
@@ -315,6 +358,11 @@ class CategoryAttributeTrainer:
             val_losses.append(val_loss)
             val_accuracies.append(val_acc)
             
+            # 에포크 결과 출력
+            print(f"    📊 Epoch {epoch+1} 결과:")
+            print(f"      학습 Loss: {train_loss:.4f}, 정확도: {train_acc:.2f}%")
+            print(f"      검증 Loss: {val_loss:.4f}, 정확도: {val_acc:.2f}%")
+            
             # 최고 성능 모델 저장
             if val_acc > best_val_acc:
                 best_val_acc = val_acc
@@ -323,15 +371,17 @@ class CategoryAttributeTrainer:
                 # 모델 저장
                 model_filename = f'best_model_{category}_{attribute}.pth'
                 torch.save(model.state_dict(), self.output_dir / model_filename)
+                print(f"      💾 새로운 최고 모델 저장! (정확도: {val_acc:.2f}%)")
                 
             else:
                 patience_counter += 1
+                print(f"      ⏳ 성능 개선 없음 ({patience_counter}/{patience})")
             
             scheduler.step()
             
             # 얼리스타핑 체크
             if patience_counter >= patience:
-                print(f"    ⚠️ Early stopping triggered!")
+                print(f"    ⚠️ Early stopping triggered! (3번 연속 개선 없음)")
                 break
         
         print(f"    ✅ {category}_{attribute} 학습 완료! 최고 정확도: {best_val_acc:.2f}%")
@@ -476,8 +526,8 @@ def main():
     # 학습기 초기화
     trainer = CategoryAttributeTrainer()
     
-    # 학습 실행 (30% 샘플링으로 빠른 실험)
-    trainer.run_training(sample_ratio=0.3)
+    # 학습 실행 (10% 샘플링으로 빠른 실험)
+    trainer.run_training(sample_ratio=0.1)
 
 if __name__ == "__main__":
     main()
