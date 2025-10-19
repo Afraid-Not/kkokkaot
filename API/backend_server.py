@@ -42,12 +42,11 @@ async def lifespan(app: FastAPI):
     print("\n🤖 AI 파이프라인 초기화 중...")
     try:
         pipeline = FashionPipeline(
-            yolo_pose_path="D:/kkokkaot/API/pre_trained_weights/yolo11n-pose.pt",
+            style_model_path="D:/kkokkaot/API/pre_trained_weights/k_fashion_best_model.pth",
             yolo_detection_path="D:/kkokkaot/API/pre_trained_weights/yolo_best.pt",
-            top_model_path="D:/kkokkaot/API/pre_trained_weights/fashion_top_model_1014_2101.pth",
-            bottom_model_path="D:/kkokkaot/API/pre_trained_weights/fashion_bottom_model_1015_1038.pth",
-            # top_model_path="D:/kkokkaot/API/pre_trained_weights/fashion_top_model.pth",
-            # bottom_model_path="D:/kkokkaot/API/pre_trained_weights/fashion_bottom_model.pth",
+            category_models_dir="D:/kkokkaot/API/pre_trained_weights/category_attributes",
+            schema_path="D:/kkokkaot/API/kfashion_attributes_schema.csv",
+            yolo_pose_path="D:/kkokkaot/API/pre_trained_weights/yolo11n-pose.pt",  # 기존 호환성을 위해 유지
             chroma_path="D:/kkokkaot/API/chroma_db",
             db_config={
                 'host': 'localhost',
