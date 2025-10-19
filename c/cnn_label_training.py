@@ -143,7 +143,7 @@ class FashionLabelTrainer:
         
         valid_data = []
         
-        for cnn_file in tqdm(cnn_files, desc="데이터 처리 중"):
+        for cnn_file in tqdm(cnn_files, desc="데이터 처리 중", leave=False):
             try:
                 # JSON 파일 로드
                 with open(cnn_file, 'r', encoding='utf-8') as f:
@@ -320,7 +320,7 @@ class FashionLabelTrainer:
             train_correct = 0
             train_total = 0
             
-            for images, labels in tqdm(train_loader, desc=f"Epoch {epoch+1}/{epochs}"):
+            for images, labels in tqdm(train_loader, desc=f"Epoch {epoch+1}/{epochs}", leave=False):
                 images, labels = images.to(DEVICE), labels.to(DEVICE)
                 
                 self.optimizer.zero_grad()
@@ -388,7 +388,7 @@ class FashionLabelTrainer:
         
         print(f"\n✅ 학습 완료! 최고 검증 정확도: {best_val_acc:.2f}%")
         
-        # 학습 곡선 저장
+        # 학습 곡선 저장다
         self.plot_training_curves(train_losses, train_accuracies, val_losses, val_accuracies)
         
         return best_val_acc
@@ -428,7 +428,7 @@ class FashionLabelTrainer:
         all_labels = []
         
         with torch.no_grad():
-            for images, labels in tqdm(test_loader, desc="평가 중"):
+            for images, labels in tqdm(test_loader, desc="평가 중", leave=False):
                 images, labels = images.to(DEVICE), labels.to(DEVICE)
                 outputs = self.model(images)
                 _, predicted = torch.max(outputs[list(outputs.keys())[0]], 1)
