@@ -42,9 +42,13 @@ async def lifespan(app: FastAPI):
     print("\n🤖 AI 파이프라인 초기화 중...")
     try:
         pipeline = FashionPipeline(
-            style_model_path="D:/kkokkaot/API/pre_trained_weights/k_fashion_best_model.pth",
+            style_model_path="D:/kkokkaot/API/pre_trained_weights/k_fashion_best_model_1019.pth",
             yolo_detection_path="D:/kkokkaot/API/pre_trained_weights/yolo_best.pt",
-            category_models_dir="D:/kkokkaot/API/pre_trained_weights/category_attributes",
+            # 새로운 의류별 모델 경로
+            top_model_path="D:/kkokkaot/models/top/best_model.pth",
+            bottom_model_path="D:/kkokkaot/models/bottom/best_model.pth", 
+            outer_model_path="D:/kkokkaot/models/outer/best_model.pth",
+            dress_model_path="D:/kkokkaot/models/dress/best_model.pth",
             schema_path="D:/kkokkaot/API/kfashion_attributes_schema.csv",
             yolo_pose_path="D:/kkokkaot/API/pre_trained_weights/yolo11n-pose.pt",  # 기존 호환성을 위해 유지
             chroma_path="D:/kkokkaot/API/chroma_db",
@@ -489,8 +493,8 @@ def get_wardrobe(user_id: int, include_defaults: bool = True):
                     b.color as bottom_color,
                     b.fit as bottom_fit
                 FROM wardrobe_items w
-                LEFT JOIN top_attributes t ON w.item_id = t.item_id
-                LEFT JOIN bottom_attributes b ON w.item_id = b.item_id
+                LEFT JOIN top_attributes_new t ON w.item_id = t.item_id
+                LEFT JOIN bottom_attributes_new b ON w.item_id = b.item_id
                 WHERE w.user_id = %s
                 ORDER BY w.upload_date DESC
             """, (user_id,))
@@ -1160,7 +1164,7 @@ def get_item_detail(item_id: int):
                     t.category as top_category,
                     t.color as top_color,
                     t.fit as top_fit,
-                    t.materials as top_materials,
+                    t.material as top_materials,
                     t.category_confidence as top_cat_conf,
                     t.color_confidence as top_color_conf,
                     t.fit_confidence as top_fit_conf,
@@ -1168,7 +1172,7 @@ def get_item_detail(item_id: int):
                     b.category as bottom_category,
                     b.color as bottom_color,
                     b.fit as bottom_fit,
-                    b.materials as bottom_materials,
+                    b.material as bottom_materials,
                     b.category_confidence as bottom_cat_conf,
                     b.color_confidence as bottom_color_conf,
                     b.fit_confidence as bottom_fit_conf,
@@ -1176,23 +1180,23 @@ def get_item_detail(item_id: int):
                     o.category as outer_category,
                     o.color as outer_color,
                     o.fit as outer_fit,
-                    o.materials as outer_materials,
+                    o.material as outer_materials,
                     o.category_confidence as outer_cat_conf,
                     o.color_confidence as outer_color_conf,
                     o.fit_confidence as outer_fit_conf,
                     -- 드레스 속성
                     d.category as dress_category,
                     d.color as dress_color,
-                    d.fit as dress_fit,
-                    d.materials as dress_materials,
+                    d.material as dress_materials,
+                    d.print_pattern as dress_print,
+                    d.style as dress_style,
                     d.category_confidence as dress_cat_conf,
-                    d.color_confidence as dress_color_conf,
-                    d.fit_confidence as dress_fit_conf
+                    d.color_confidence as dress_color_conf
                 FROM wardrobe_items w
-                LEFT JOIN top_attributes t ON w.item_id = t.item_id
-                LEFT JOIN bottom_attributes b ON w.item_id = b.item_id
-                LEFT JOIN outer_attributes o ON w.item_id = o.item_id
-                LEFT JOIN dress_attributes d ON w.item_id = d.item_id
+                LEFT JOIN top_attributes_new t ON w.item_id = t.item_id
+                LEFT JOIN bottom_attributes_new b ON w.item_id = b.item_id
+                LEFT JOIN outer_attributes_new o ON w.item_id = o.item_id
+                LEFT JOIN dress_attributes_new d ON w.item_id = d.item_id
                 WHERE w.item_id = %s
             """, (item_id,))
             
@@ -1260,11 +1264,11 @@ def get_item_detail(item_id: int):
                 item_data['dress_attributes'] = {
                     'category': row[28],
                     'color': row[29],
-                    'fit': row[30],
-                    'materials': row[31],
-                    'category_confidence': float(row[32]) if row[32] else 0,
-                    'color_confidence': float(row[33]) if row[33] else 0,
-                    'fit_confidence': float(row[34]) if row[34] else 0,
+                    'material': row[30],
+                    'print_pattern': row[31],
+                    'style': row[32],
+                    'category_confidence': float(row[33]) if row[33] else 0,
+                    'color_confidence': float(row[34]) if row[34] else 0,
                 }
             
             # 5. ✅ 분리된 이미지 경로 찾기 (폴더 구조 반영)
@@ -1899,8 +1903,8 @@ def get_matching_bottom_or_outer(
                     o.category as outer_category,
                     o.color as outer_color
                 FROM wardrobe_items w
-                LEFT JOIN bottom_attributes b ON w.item_id = b.item_id AND w.has_bottom = TRUE
-                LEFT JOIN outer_attributes o ON w.item_id = o.item_id AND w.has_outer = TRUE
+                LEFT JOIN bottom_attributes_new b ON w.item_id = b.item_id AND w.has_bottom = TRUE
+                LEFT JOIN outer_attributes_new o ON w.item_id = o.item_id AND w.has_outer = TRUE
                 WHERE w.user_id = %s 
                 AND (w.has_bottom = TRUE OR w.has_outer = TRUE)
                 AND w.item_id != %s
@@ -2075,8 +2079,8 @@ def get_matching_top_or_outer_top(
                     o.category as outer_category,
                     o.color as outer_color
                 FROM wardrobe_items w
-                LEFT JOIN top_attributes t ON w.item_id = t.item_id AND w.has_top = TRUE
-                LEFT JOIN outer_attributes o ON w.item_id = o.item_id AND w.has_outer = TRUE
+                LEFT JOIN top_attributes_new t ON w.item_id = t.item_id AND w.has_top = TRUE
+                LEFT JOIN outer_attributes_new o ON w.item_id = o.item_id AND w.has_outer = TRUE
                 WHERE w.user_id = %s 
                 AND (w.has_top = TRUE OR w.has_outer = TRUE)
                 AND w.item_id != %s
@@ -2438,8 +2442,8 @@ def get_recommendations_for_dress(item_id: int, n_results: int = 3, user_id: int
                     o.category as outer_category,
                     o.color as outer_color
                 FROM wardrobe_items w
-                LEFT JOIN bottom_attributes b ON w.item_id = b.item_id AND w.has_bottom = TRUE
-                LEFT JOIN outer_attributes o ON w.item_id = o.item_id AND w.has_outer = TRUE
+                LEFT JOIN bottom_attributes_new b ON w.item_id = b.item_id AND w.has_bottom = TRUE
+                LEFT JOIN outer_attributes_new o ON w.item_id = o.item_id AND w.has_outer = TRUE
                 WHERE w.user_id = %s 
                 AND (w.has_bottom = TRUE OR w.has_outer = TRUE)
                 AND w.item_id != %s
@@ -2565,8 +2569,8 @@ def get_default_recommendations(user_id: int):
                 FROM user_recommendations ur
                 JOIN wardrobe_items w ON ur.item_id = w.item_id
                 LEFT JOIN top_attributes t ON w.item_id = t.item_id AND w.has_top = TRUE
-                LEFT JOIN bottom_attributes b ON w.item_id = b.item_id AND w.has_bottom = TRUE
-                LEFT JOIN outer_attributes o ON w.item_id = o.item_id AND w.has_outer = TRUE
+                LEFT JOIN bottom_attributes_new b ON w.item_id = b.item_id AND w.has_bottom = TRUE
+                LEFT JOIN outer_attributes_new o ON w.item_id = o.item_id AND w.has_outer = TRUE
                 LEFT JOIN dress_attributes d ON w.item_id = d.item_id AND w.has_dress = TRUE
                 WHERE ur.user_id = %s 
                 AND ur.recommendation_type = 'default_item'
@@ -2669,14 +2673,14 @@ def get_advanced_recommendations(
                 SELECT 
                     w.item_id, w.user_id, w.original_image_path, w.is_default,
                     w.has_top, w.has_bottom, w.has_outer, w.has_dress,
-                    t.category as top_category, t.color as top_color, t.fit as top_fit, t.materials as top_materials,
-                    b.category as bottom_category, b.color as bottom_color, b.fit as bottom_fit, b.materials as bottom_materials,
-                    o.category as outer_category, o.color as outer_color, o.fit as outer_fit, o.materials as outer_materials,
-                    d.category as dress_category, d.color as dress_color, d.fit as dress_fit, d.materials as dress_materials
+                    t.category as top_category, t.color as top_color, t.fit as top_fit, t.material as top_materials,
+                    b.category as bottom_category, b.color as bottom_color, b.fit as bottom_fit, b.material as bottom_materials,
+                    o.category as outer_category, o.color as outer_color, o.fit as outer_fit, o.material as outer_materials,
+                    d.category as dress_category, d.color as dress_color, d.material as dress_materials, d.print_pattern as dress_print, d.style as dress_style
                 FROM wardrobe_items w
                 LEFT JOIN top_attributes t ON w.item_id = t.item_id AND w.has_top = TRUE
-                LEFT JOIN bottom_attributes b ON w.item_id = b.item_id AND w.has_bottom = TRUE
-                LEFT JOIN outer_attributes o ON w.item_id = o.item_id AND w.has_outer = TRUE
+                LEFT JOIN bottom_attributes_new b ON w.item_id = b.item_id AND w.has_bottom = TRUE
+                LEFT JOIN outer_attributes_new o ON w.item_id = o.item_id AND w.has_outer = TRUE
                 LEFT JOIN dress_attributes d ON w.item_id = d.item_id AND w.has_dress = TRUE
                 WHERE w.item_id = %s
             """, (item_id,))
@@ -2697,14 +2701,14 @@ def get_advanced_recommendations(
                 SELECT 
                     w.item_id, w.user_id, w.original_image_path, w.is_default,
                     w.has_top, w.has_bottom, w.has_outer, w.has_dress,
-                    t.category as top_category, t.color as top_color, t.fit as top_fit, t.materials as top_materials,
-                    b.category as bottom_category, b.color as bottom_color, b.fit as bottom_fit, b.materials as bottom_materials,
-                    o.category as outer_category, o.color as outer_color, o.fit as outer_fit, o.materials as outer_materials,
-                    d.category as dress_category, d.color as dress_color, d.fit as dress_fit, d.materials as dress_materials
+                    t.category as top_category, t.color as top_color, t.fit as top_fit, t.material as top_materials,
+                    b.category as bottom_category, b.color as bottom_color, b.fit as bottom_fit, b.material as bottom_materials,
+                    o.category as outer_category, o.color as outer_color, o.fit as outer_fit, o.material as outer_materials,
+                    d.category as dress_category, d.color as dress_color, d.material as dress_materials, d.print_pattern as dress_print, d.style as dress_style
                 FROM wardrobe_items w
                 LEFT JOIN top_attributes t ON w.item_id = t.item_id AND w.has_top = TRUE
-                LEFT JOIN bottom_attributes b ON w.item_id = b.item_id AND w.has_bottom = TRUE
-                LEFT JOIN outer_attributes o ON w.item_id = o.item_id AND w.has_outer = TRUE
+                LEFT JOIN bottom_attributes_new b ON w.item_id = b.item_id AND w.has_bottom = TRUE
+                LEFT JOIN outer_attributes_new o ON w.item_id = o.item_id AND w.has_outer = TRUE
                 LEFT JOIN dress_attributes d ON w.item_id = d.item_id AND w.has_dress = TRUE
                 WHERE w.user_id = %s AND w.item_id != %s
             """, (user_id, item_id))
@@ -2725,10 +2729,10 @@ def get_advanced_recommendations(
                     SELECT 
                         w.item_id, w.user_id, w.original_image_path, w.is_default,
                         w.has_top, w.has_bottom, w.has_outer, w.has_dress,
-                        t.category as top_category, t.color as top_color, t.fit as top_fit, t.materials as top_materials,
-                        b.category as bottom_category, b.color as bottom_color, b.fit as bottom_fit, b.materials as bottom_materials,
-                        o.category as outer_category, o.color as outer_color, o.fit as outer_fit, o.materials as outer_materials,
-                        d.category as dress_category, d.color as dress_color, d.fit as dress_fit, d.materials as dress_materials
+                        t.category as top_category, t.color as top_color, t.fit as top_fit, t.material as top_materials,
+                        b.category as bottom_category, b.color as bottom_color, b.fit as bottom_fit, b.material as bottom_materials,
+                        o.category as outer_category, o.color as outer_color, o.fit as outer_fit, o.material as outer_materials,
+                        d.category as dress_category, d.color as dress_color, d.material as dress_materials, d.print_pattern as dress_print, d.style as dress_style
                     FROM wardrobe_items w
                     LEFT JOIN top_attributes t ON w.item_id = t.item_id AND w.has_top = TRUE
                     LEFT JOIN bottom_attributes b ON w.item_id = b.item_id AND w.has_bottom = TRUE
