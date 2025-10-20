@@ -334,14 +334,29 @@ async def upload_wardrobe(
                 if result['success']:
                     print(f"✅ AI 분석 완료! 아이템 ID: {result['item_id']}")
                     
+                    # category_attributes에서 각 카테고리별 속성 추출
+                    category_attrs = result.get('category_attributes', {})
+                    
+                    # 한글 카테고리명을 영어로 매핑
+                    top_attrs = category_attrs.get('상의')
+                    bottom_attrs = category_attrs.get('하의')
+                    outer_attrs = category_attrs.get('아우터')
+                    dress_attrs = category_attrs.get('원피스')
+                    
+                    # 속성 데이터를 value만 추출하여 정리
+                    def extract_values(attrs):
+                        if not attrs:
+                            return None
+                        return {key: data['value'] for key, data in attrs.items()}
+                    
                     return {
                         "success": True,
                         "message": "이미지 분석 완료!",
                         "item_id": result['item_id'],
-                        "top_attributes": result.get('top_attributes'),
-                        "bottom_attributes": result.get('bottom_attributes'),
-                        "outer_attributes": result.get('outer_attributes'),
-                        "dress_attributes": result.get('dress_attributes'),
+                        "top_attributes": extract_values(top_attrs),
+                        "bottom_attributes": extract_values(bottom_attrs),
+                        "outer_attributes": extract_values(outer_attrs),
+                        "dress_attributes": extract_values(dress_attrs),
                     }
                 else:
                     error_msg = result.get('error', '알 수 없는 오류')
@@ -461,6 +476,291 @@ def delete_wardrobe_item(item_id: int):
         print(f"{'='*60}\n")
         raise HTTPException(status_code=500, detail=f"삭제 중 서버 오류: {str(e)}")
 
+# ✅ 아이템 정보 생성 헬퍼 함수
+def _create_item_info(row, user_id: int, is_user_item: bool = True):
+    """아이템 정보를 생성하는 헬퍼 함수"""
+    item_id = row[0]
+    image_path = row[1]
+    has_top = row[3]
+    has_bottom = row[4]
+    has_outer = row[5]
+    has_dress = row[6]
+    is_default = row[7]
+    
+    # 이미지 경로 설정
+    if is_user_item:
+        processed_dir = Path("./processed_images") / f"user_{user_id}"
+    else:
+        processed_dir = Path("./processed_images")
+    
+    # 이미지 우선순위: 전체 > 개별 카테고리 > 원본
+    display_image_path = None
+    image_category = 'full'
+    
+    # 1순위: 전체 이미지
+    full_path = processed_dir / 'full' / f"item_{item_id}_full.jpg"
+    if full_path.exists():
+        display_image_path = f"item_{item_id}_full.jpg"
+        image_category = 'full'
+    
+    # 2순위: 개별 카테고리 이미지
+    elif has_dress:
+        dress_path = processed_dir / 'dress' / f"item_{item_id}_dress.jpg"
+        if dress_path.exists():
+            display_image_path = f"item_{item_id}_dress.jpg"
+            image_category = 'dress'
+    elif has_outer:
+        outer_path = processed_dir / 'outer' / f"item_{item_id}_outer.jpg"
+        if outer_path.exists():
+            display_image_path = f"item_{item_id}_outer.jpg"
+            image_category = 'outer'
+    elif has_top:
+        top_path = processed_dir / 'top' / f"item_{item_id}_top.jpg"
+        if top_path.exists():
+            display_image_path = f"item_{item_id}_top.jpg"
+            image_category = 'top'
+    elif has_bottom:
+        bottom_path = processed_dir / 'bottom' / f"item_{item_id}_bottom.jpg"
+        if bottom_path.exists():
+            display_image_path = f"item_{item_id}_bottom.jpg"
+            image_category = 'bottom'
+    
+    # 3순위: 원본 이미지
+    if not display_image_path:
+        filename = Path(image_path).name
+        display_image_path = filename
+        image_category = 'full'
+    
+    # 분리된 이미지 경로들
+    top_image = None
+    bottom_image = None
+    outer_image = None
+    dress_image = None
+    
+    if has_top:
+        top_img_path = processed_dir / 'top' / f"item_{item_id}_top.jpg"
+        if top_img_path.exists():
+            if is_user_item:
+                top_image = f"/api/processed-images/user_{user_id}/top/item_{item_id}_top.jpg"
+            else:
+                top_image = f"/api/processed-images/top/item_{item_id}_top.jpg"
+    
+    if has_bottom:
+        bottom_img_path = processed_dir / 'bottom' / f"item_{item_id}_bottom.jpg"
+        if bottom_img_path.exists():
+            if is_user_item:
+                bottom_image = f"/api/processed-images/user_{user_id}/bottom/item_{item_id}_bottom.jpg"
+            else:
+                bottom_image = f"/api/processed-images/bottom/item_{item_id}_bottom.jpg"
+    
+    if has_outer:
+        outer_img_path = processed_dir / 'outer' / f"item_{item_id}_outer.jpg"
+        if outer_img_path.exists():
+            if is_user_item:
+                outer_image = f"/api/processed-images/user_{user_id}/outer/item_{item_id}_outer.jpg"
+            else:
+                outer_image = f"/api/processed-images/outer/item_{item_id}_outer.jpg"
+    
+    if has_dress:
+        dress_img_path = processed_dir / 'dress' / f"item_{item_id}_dress.jpg"
+        if dress_img_path.exists():
+            if is_user_item:
+                dress_image = f"/api/processed-images/user_{user_id}/dress/item_{item_id}_dress.jpg"
+            else:
+                dress_image = f"/api/processed-images/dress/item_{item_id}_dress.jpg"
+    
+    # 이미지 API 경로
+    if is_user_item:
+        image_api_path = f"/api/processed-images/user_{user_id}/{image_category}/{display_image_path}"
+    else:
+        image_api_path = f"/api/processed-images/{image_category}/{display_image_path}"
+    
+    return {
+        "item_id": item_id,
+        "image_path": image_api_path,
+        "upload_date": row[2].isoformat() if row[2] else None,
+        "has_top": has_top,
+        "has_bottom": has_bottom,
+        "has_outer": has_outer,
+        "has_dress": has_dress,
+        "is_default": is_default,
+        "top_image": top_image,
+        "bottom_image": bottom_image,
+        "outer_image": outer_image,
+        "dress_image": dress_image,
+        "attributes": {
+            "top": {
+                "category": row[8] if len(row) > 8 else None,
+                "color": row[9] if len(row) > 9 else None,
+                "fit": row[10] if len(row) > 10 else None
+            },
+            "bottom": {
+                "category": row[11] if len(row) > 11 else None,
+                "color": row[12] if len(row) > 12 else None,
+                "fit": row[13] if len(row) > 13 else None
+            }
+        }
+    }
+
+# ✅ 구분된 옷장 조회 API (사용자 아이템 + 기본 아이템 구분)
+@app.get("/api/wardrobe/separated/{user_id}")
+def get_separated_wardrobe(user_id: int):
+    """사용자 아이템과 기본 아이템을 구분해서 조회"""
+    
+    print(f"\n{'='*60}")
+    print(f"👔 구분된 옷장 조회 요청 (user_id: {user_id})")
+    print(f"{'='*60}")
+    
+    if not pipeline:
+        return {
+            "success": False,
+            "message": "서버 초기화 실패",
+            "user_items": [],
+            "default_items": []
+        }
+    
+    # 간단한 조회로 변경 (타임아웃 제거)
+    
+    try:
+        with pipeline.db_conn.cursor() as cur:
+            # 1. 사용자 아이템 조회
+            cur.execute("""
+                SELECT 
+                    w.item_id,
+                    w.original_image_path,
+                    w.upload_date,
+                    w.has_top,
+                    w.has_bottom,
+                    w.has_outer,
+                    w.has_dress,
+                    w.is_default,
+                    t.category as top_category,
+                    t.color as top_color,
+                    t.fit as top_fit,
+                    b.category as bottom_category,
+                    b.color as bottom_color,
+                    b.fit as bottom_fit
+                FROM wardrobe_items w
+                LEFT JOIN top_attributes_new t ON w.item_id = t.item_id
+                LEFT JOIN bottom_attributes_new b ON w.item_id = b.item_id
+                WHERE w.user_id = %s
+                ORDER BY w.upload_date DESC
+            """, (user_id,))
+            
+            user_items = cur.fetchall()
+            print(f"📦 사용자 아이템: {len(user_items)}개")
+            
+            # 2. 기본 아이템 조회
+            cur.execute("""
+                SELECT 
+                    w.item_id,
+                    w.original_image_path,
+                    w.upload_date,
+                    w.has_top,
+                    w.has_bottom,
+                    w.has_outer,
+                    w.has_dress,
+                    w.is_default,
+                    t.category as top_category,
+                    t.color as top_color,
+                    t.fit as top_fit,
+                    b.category as bottom_category,
+                    b.color as bottom_color,
+                    b.fit as bottom_fit
+                FROM wardrobe_items w
+                LEFT JOIN top_attributes_new t ON w.item_id = t.item_id
+                LEFT JOIN bottom_attributes_new b ON w.item_id = b.item_id
+                WHERE w.user_id = 0 AND w.is_default = TRUE
+                ORDER BY w.item_id
+                LIMIT 10
+            """)
+            
+            default_items = cur.fetchall()
+            print(f"📦 기본 아이템: {len(default_items)}개")
+            
+            # 3. 사용자 아이템 처리
+            user_items_list = []
+            for row in user_items:
+                item_info = _create_item_info(row, user_id, is_user_item=True)
+                user_items_list.append(item_info)
+            
+            # 4. 기본 아이템 처리
+            default_items_list = []
+            for row in default_items:
+                item_info = _create_item_info(row, user_id, is_user_item=False)
+                default_items_list.append(item_info)
+            
+            print(f"✅ 조회 완료: 사용자 {len(user_items_list)}개, 기본 {len(default_items_list)}개")
+            print(f"{'='*60}\n")
+            
+            # 조회 완료
+            
+            return {
+                'success': True,
+                'user_items': user_items_list,
+                'default_items': default_items_list,
+                'total_user_items': len(user_items_list),
+                'total_default_items': len(default_items_list)
+            }
+            
+    except Exception as e:
+        print(f"❌ 조회 실패: {e}")
+        print(f"{'='*60}\n")
+        
+        return {
+            'success': False,
+            'message': str(e),
+            'user_items': [],
+            'default_items': []
+        }
+
+# ✅ 간단한 옷장 조회 API (폴백용)
+@app.get("/api/wardrobe/simple/{user_id}")
+def get_simple_wardrobe(user_id: int):
+    """간단한 옷장 조회 (타임아웃 방지)"""
+    
+    print(f"\n{'='*60}")
+    print(f"👔 간단한 옷장 조회 요청 (user_id: {user_id})")
+    print(f"{'='*60}")
+    
+    if not pipeline:
+        return {
+            "success": False,
+            "message": "서버 초기화 실패",
+            "user_items": [],
+            "default_items": []
+        }
+    
+    try:
+        with pipeline.db_conn.cursor() as cur:
+            # 1. 사용자 아이템 개수만 조회
+            cur.execute("SELECT COUNT(*) FROM wardrobe_items WHERE user_id = %s", (user_id,))
+            user_count = cur.fetchone()[0]
+            
+            # 2. 기본 아이템 개수만 조회
+            cur.execute("SELECT COUNT(*) FROM wardrobe_items WHERE user_id = 0 AND is_default = TRUE")
+            default_count = cur.fetchone()[0]
+            
+            print(f"📦 사용자 아이템: {user_count}개, 기본 아이템: {default_count}개")
+            
+            return {
+                'success': True,
+                'user_items': [],
+                'default_items': [],
+                'total_user_items': user_count,
+                'total_default_items': min(default_count, 20),
+                'message': '빠른 조회 완료'
+            }
+            
+    except Exception as e:
+        print(f"❌ 간단한 조회 실패: {e}")
+        return {
+            'success': False,
+            'message': str(e),
+            'user_items': [],
+            'default_items': []
+        }
+
 # ✅ 옷장 조회 API 수정 (기본 아이템 포함)
 @app.get("/api/wardrobe/{user_id}")
 def get_wardrobe(user_id: int, include_defaults: bool = True):
@@ -505,10 +805,10 @@ def get_wardrobe(user_id: int, include_defaults: bool = True):
             
             user_items = cur.fetchall()
             
-            # 2. 사용자 아이템이 없으면 기본 아이템 포함
-            if len(user_items) == 0 and include_defaults:
-                print(f"  ⚠️  사용자 아이템 없음 → 기본 아이템 로드")
-                
+            # 2. 기본 아이템도 항상 포함 (include_defaults=True일 때)
+            default_items = []
+            if include_defaults:
+                print(f"  📦 기본 아이템 로드 중...")
                 cur.execute("""
                     SELECT 
                         w.item_id,
@@ -532,15 +832,17 @@ def get_wardrobe(user_id: int, include_defaults: bool = True):
                     ORDER BY w.style, w.item_id
                     LIMIT 20
                 """)
-                
                 default_items = cur.fetchall()
-                rows = default_items
-            else:
-                rows = user_items
+                print(f"  ✅ 기본 아이템 {len(default_items)}개 로드 완료")
+            
+            # 3. 사용자 아이템과 기본 아이템을 구분해서 처리
+            print(f"  ✅ 사용자 아이템 {len(user_items)}개, 기본 아이템 {len(default_items)}개")
             
             items = []
             
-            for row in rows:
+            # 4. 사용자 아이템 처리
+            user_items_list = []
+            for row in user_items:
                 item_id = row[0]
                 image_path = row[1]
                 has_top = row[3]
@@ -1154,16 +1456,18 @@ def get_item_detail(item_id: int):
     
     try:
         with pipeline.db_conn.cursor() as cur:
-            # 1. 기본 정보 + 상의/하의 속성 JOIN
+            # 1. 기본 정보 + 상의/하의 속성 JOIN (사용자 ID도 함께 조회)
             cur.execute("""
                 SELECT 
                     w.item_id,
+                    w.user_id,
                     w.original_image_path,
                     w.upload_date,
                     w.has_top,
                     w.has_bottom,
                     w.has_outer,
                     w.has_dress,
+                    w.is_default,
                     -- 상의 속성
                     t.category as top_category,
                     t.color as top_color,
@@ -1214,98 +1518,137 @@ def get_item_detail(item_id: int):
                 }
             
             # 2. 데이터 파싱
+            user_id = row[1]
+            is_default = row[8]
             item_data = {
                 'item_id': row[0],
-                'original_image_path': row[1],
-                'upload_date': row[2].isoformat() if row[2] else None,
-                'has_top': row[3],
-                'has_bottom': row[4],
-                'has_outer': row[5],
-                'has_dress': row[6],
+                'user_id': user_id,
+                'original_image_path': row[2],
+                'upload_date': row[3].isoformat() if row[3] else None,
+                'has_top': row[4],
+                'has_bottom': row[5],
+                'has_outer': row[6],
+                'has_dress': row[7],
+                'is_default': is_default,
             }
             
             # 3. 상의 속성
-            if row[3]:  # has_top
+            if row[4]:  # has_top
                 item_data['top_attributes'] = {
-                    'category': row[7],
-                    'color': row[8],
-                    'fit': row[9],
-                    'materials': row[10],
-                    'category_confidence': float(row[11]) if row[11] else 0,
-                    'color_confidence': float(row[12]) if row[12] else 0,
-                    'fit_confidence': float(row[13]) if row[13] else 0,
+                    'category': row[9],
+                    'color': row[10],
+                    'fit': row[11],
+                    'materials': row[12],
+                    'category_confidence': float(row[13]) if row[13] else 0,
+                    'color_confidence': float(row[14]) if row[14] else 0,
+                    'fit_confidence': float(row[15]) if row[15] else 0,
                 }
                 
                 # ✅ 아우터 판단 (이제 has_outer 필드로 직접 확인)
-                item_data['is_outer'] = row[5]  # has_outer
+                item_data['is_outer'] = row[6]  # has_outer
             
             # 4. 하의 속성
-            if row[4]:  # has_bottom
+            if row[5]:  # has_bottom
                 item_data['bottom_attributes'] = {
-                    'category': row[14],
-                    'color': row[15],
-                    'fit': row[16],
-                    'materials': row[17],
-                    'category_confidence': float(row[18]) if row[18] else 0,
-                    'color_confidence': float(row[19]) if row[19] else 0,
-                    'fit_confidence': float(row[20]) if row[20] else 0,
+                    'category': row[16],
+                    'color': row[17],
+                    'fit': row[18],
+                    'materials': row[19],
+                    'category_confidence': float(row[20]) if row[20] else 0,
+                    'color_confidence': float(row[21]) if row[21] else 0,
+                    'fit_confidence': float(row[22]) if row[22] else 0,
                 }
             
             # 5. 아우터 속성
-            if row[5]:  # has_outer
+            if row[6]:  # has_outer
                 item_data['outer_attributes'] = {
-                    'category': row[21],
-                    'color': row[22],
-                    'fit': row[23],
-                    'materials': row[24],
-                    'category_confidence': float(row[25]) if row[25] else 0,
-                    'color_confidence': float(row[26]) if row[26] else 0,
-                    'fit_confidence': float(row[27]) if row[27] else 0,
+                    'category': row[23],
+                    'color': row[24],
+                    'fit': row[25],
+                    'materials': row[26],
+                    'category_confidence': float(row[27]) if row[27] else 0,
+                    'color_confidence': float(row[28]) if row[28] else 0,
+                    'fit_confidence': float(row[29]) if row[29] else 0,
                 }
             
             # 6. 드레스 속성
-            if row[6]:  # has_dress
+            if row[7]:  # has_dress
                 item_data['dress_attributes'] = {
-                    'category': row[28],
-                    'color': row[29],
-                    'material': row[30],
-                    'print_pattern': row[31],
-                    'style': row[32],
-                    'category_confidence': float(row[33]) if row[33] else 0,
-                    'color_confidence': float(row[34]) if row[34] else 0,
+                    'category': row[30],
+                    'color': row[31],
+                    'material': row[32],
+                    'print_pattern': row[33],
+                    'style': row[34],
+                    'category_confidence': float(row[35]) if row[35] else 0,
+                    'color_confidence': float(row[36]) if row[36] else 0,
                 }
             
-            # 5. ✅ 분리된 이미지 경로 찾기 (폴더 구조 반영)
+            # 7. ✅ 분리된 이미지 경로 찾기 (사용자 ID 기반)
             processed_dir = Path("./processed_images")
             
-            # 전체 이미지
-            full_image_path = processed_dir / 'full' / f"item_{item_id}_full.jpg"
-            if full_image_path.exists():
-                item_data['full_image_path'] = f"/api/processed-images/full/item_{item_id}_full.jpg"
-            
-            # 상의
-            if row[3]:  # has_top
-                top_image_path = processed_dir / 'top' / f"item_{item_id}_top.jpg"
-                if top_image_path.exists():
-                    item_data['top_image_path'] = f"/api/processed-images/top/item_{item_id}_top.jpg"
-            
-            # 하의
-            if row[4]:  # has_bottom
-                bottom_image_path = processed_dir / 'bottom' / f"item_{item_id}_bottom.jpg"
-                if bottom_image_path.exists():
-                    item_data['bottom_image_path'] = f"/api/processed-images/bottom/item_{item_id}_bottom.jpg"
-            
-            # 아우터
-            if row[5]:  # has_outer
-                outer_image_path = processed_dir / 'outer' / f"item_{item_id}_outer.jpg"
-                if outer_image_path.exists():
-                    item_data['outer_image_path'] = f"/api/processed-images/outer/item_{item_id}_outer.jpg"
-            
-            # 드레스
-            if row[6]:  # has_dress
-                dress_image_path = processed_dir / 'dress' / f"item_{item_id}_dress.jpg"
-                if dress_image_path.exists():
-                    item_data['dress_image_path'] = f"/api/processed-images/dress/item_{item_id}_dress.jpg"
+            # 사용자 아이템인지 기본 아이템인지에 따라 경로 결정
+            if not is_default and user_id > 0:
+                # 사용자 아이템: user_{user_id} 폴더 사용
+                user_dir = processed_dir / f"user_{user_id}"
+                
+                # 전체 이미지
+                full_image_path = user_dir / 'full' / f"item_{item_id}_full.jpg"
+                if full_image_path.exists():
+                    item_data['full_image_path'] = f"/api/processed-images/user_{user_id}/full/item_{item_id}_full.jpg"
+                
+                # 상의
+                if row[4]:  # has_top
+                    top_image_path = user_dir / 'top' / f"item_{item_id}_top.jpg"
+                    if top_image_path.exists():
+                        item_data['top_image_path'] = f"/api/processed-images/user_{user_id}/top/item_{item_id}_top.jpg"
+                
+                # 하의
+                if row[5]:  # has_bottom
+                    bottom_image_path = user_dir / 'bottom' / f"item_{item_id}_bottom.jpg"
+                    if bottom_image_path.exists():
+                        item_data['bottom_image_path'] = f"/api/processed-images/user_{user_id}/bottom/item_{item_id}_bottom.jpg"
+                
+                # 아우터
+                if row[6]:  # has_outer
+                    outer_image_path = user_dir / 'outer' / f"item_{item_id}_outer.jpg"
+                    if outer_image_path.exists():
+                        item_data['outer_image_path'] = f"/api/processed-images/user_{user_id}/outer/item_{item_id}_outer.jpg"
+                
+                # 드레스
+                if row[7]:  # has_dress
+                    dress_image_path = user_dir / 'dress' / f"item_{item_id}_dress.jpg"
+                    if dress_image_path.exists():
+                        item_data['dress_image_path'] = f"/api/processed-images/user_{user_id}/dress/item_{item_id}_dress.jpg"
+            else:
+                # 기본 아이템: 기본 경로 사용
+                # 전체 이미지
+                full_image_path = processed_dir / 'full' / f"item_{item_id}_full.jpg"
+                if full_image_path.exists():
+                    item_data['full_image_path'] = f"/api/processed-images/full/item_{item_id}_full.jpg"
+                
+                # 상의
+                if row[4]:  # has_top
+                    top_image_path = processed_dir / 'top' / f"item_{item_id}_top.jpg"
+                    if top_image_path.exists():
+                        item_data['top_image_path'] = f"/api/processed-images/top/item_{item_id}_top.jpg"
+                
+                # 하의
+                if row[5]:  # has_bottom
+                    bottom_image_path = processed_dir / 'bottom' / f"item_{item_id}_bottom.jpg"
+                    if bottom_image_path.exists():
+                        item_data['bottom_image_path'] = f"/api/processed-images/bottom/item_{item_id}_bottom.jpg"
+                
+                # 아우터
+                if row[6]:  # has_outer
+                    outer_image_path = processed_dir / 'outer' / f"item_{item_id}_outer.jpg"
+                    if outer_image_path.exists():
+                        item_data['outer_image_path'] = f"/api/processed-images/outer/item_{item_id}_outer.jpg"
+                
+                # 드레스
+                if row[7]:  # has_dress
+                    dress_image_path = processed_dir / 'dress' / f"item_{item_id}_dress.jpg"
+                    if dress_image_path.exists():
+                        item_data['dress_image_path'] = f"/api/processed-images/dress/item_{item_id}_dress.jpg"
             
             print(f"✅ 상세 정보 조회 완료")
             print(f"{'='*60}\n")
@@ -1372,7 +1715,31 @@ def get_user_processed_image(user_id: int, category: str, filename: str):
         print(f"✅ 사용자 {user_id} 이미지 사용: {user_file_path}")
         return FileResponse(str(user_file_path))
     
-    print(f"❌ 사용자 {user_id} 이미지를 찾을 수 없습니다: {user_file_path}")
+    print(f"⚠️ 사용자 {user_id} 이미지를 찾을 수 없습니다: {user_file_path}")
+    
+    # 1순위: 기본 아이템 이미지에서 찾기
+    default_items_dir = Path("./default_items")
+    if default_items_dir.exists():
+        # 기본 아이템 폴더에서 랜덤 이미지 선택
+        image_files = []
+        for ext in ['.jpg', '.jpeg', '.png', '.JPG', '.JPEG', '.PNG']:
+            image_files.extend(default_items_dir.glob(f"*{ext}"))
+        
+        if image_files:
+            import random
+            random_image = random.choice(image_files)
+            print(f"✅ 기본 아이템 이미지로 대체: {random_image}")
+            return FileResponse(str(random_image))
+    
+    # 2순위: 플레이스홀더 이미지
+    placeholder_path = Path("./default_items") / "placeholder.jpg"
+    if os.path.exists(str(placeholder_path)):
+        print(f"✅ 플레이스홀더 이미지 사용: {placeholder_path}")
+        return FileResponse(str(placeholder_path))
+    
+    # 3순위: 빈 이미지 생성 (1x1 투명 픽셀)
+    print(f"⚠️ 모든 이미지 소스 실패 - 빈 이미지 반환")
+    # 여기서는 간단한 에러 메시지 대신 기본 아이템 중 하나를 반환
     raise HTTPException(status_code=404, detail="User image not found")
 
 # 기존 API도 유지 (하위 호환성)
