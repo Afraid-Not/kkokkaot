@@ -33,7 +33,11 @@ class FashionPipeline:
     def __init__(self, 
                 style_model_path: str = "D:/kkokkaot/API/pre_trained_weights/k_fashion_best_model.pth",
                 yolo_detection_path: str = "D:/kkokkaot/API/pre_trained_weights/yolo_best.pt",
-                category_models_dir: str = "D:/kkokkaot/API/pre_trained_weights/category_attributes",
+                # 새로운 의류별 모델 경로
+                top_model_path: str = "D:/kkokkaot/models/top/best_model.pth",
+                bottom_model_path: str = "D:/kkokkaot/models/bottom/best_model.pth",
+                outer_model_path: str = "D:/kkokkaot/models/outer/best_model.pth",
+                dress_model_path: str = "D:/kkokkaot/models/dress/best_model.pth",
                 schema_path: str = "D:/kkokkaot/API/kfashion_attributes_schema.csv",
                 yolo_pose_path: str = None,  # 기존 호환성을 위해 유지
                 chroma_path: str = "./chroma_db",
@@ -50,9 +54,11 @@ class FashionPipeline:
         print("2. YOLO Detection 모델 로드...")
         self.yolo_detection_model = YOLO(yolo_detection_path)
         
-        # 3. 카테고리별 속성 모델 로드
-        print("3. 카테고리별 속성 모델 로드...")
-        self.category_models = self.load_category_models(category_models_dir)
+        # 3. 의류별 속성 모델 로드
+        print("3. 의류별 속성 모델 로드...")
+        self.category_models = self.load_category_models(
+            top_model_path, bottom_model_path, outer_model_path, dress_model_path
+        )
         
         # 4. 스키마 로드
         print("4. 속성 스키마 로드...")
@@ -123,70 +129,107 @@ class FashionPipeline:
         try:
             checkpoint = torch.load(model_path, map_location=DEVICE, weights_only=False)
             
-            # 모델 구조 추정 (일반적인 ResNet 기반)
-            num_classes = 22  # 22개 스타일
-            model = models.resnet50(pretrained=False)
-            model.fc = nn.Linear(model.fc.in_features, num_classes)
-            model.load_state_dict(checkpoint)
-            model.to(DEVICE)
-            model.eval()
+            # 체크포인트 구조 확인
+            if 'model_state_dict' in checkpoint:
+                # 새로운 체크포인트 구조 (학습된 모델)
+                model_state_dict = checkpoint['model_state_dict']
+                class_to_idx = checkpoint.get('class_to_idx', {})
+                
+                # 클래스 개수 확인
+                num_classes = len(class_to_idx) if class_to_idx else 22
+                
+                # KFashionModel 커스텀 모델 구조 사용
+                model = self._create_kfashion_model(num_classes)
+                model.load_state_dict(model_state_dict)
+                model.to(DEVICE)
+                model.eval()
+                
+                # 클래스 이름 추출
+                if class_to_idx:
+                    style_classes = [k for k, v in sorted(class_to_idx.items(), key=lambda x: x[1])]
+                else:
+                    # 기본 스타일 클래스
+                    style_classes = [
+                        '로맨틱', '페미닌', '섹시', '젠더리스/젠더플루이드', '매스큘린', '톰보이',
+                        '히피', '오리엔탈', '웨스턴', '컨트리', '리조트', '모던',
+                        '소피스트케이티드', '아방가르드', '펑크', '키치/키덜트', '레트로',
+                        '힙합', '클래식', '프레피', '스트리트', '밀리터리', '스포티'
+                    ]
+                
+            else:
+                # 기존 구조 (직접 state_dict)
+                num_classes = 22
+                model = models.resnet50(pretrained=False)
+                model.fc = nn.Linear(model.fc.in_features, num_classes)
+                model.load_state_dict(checkpoint)
+                model.to(DEVICE)
+                model.eval()
+                
+                style_classes = [
+                    '로맨틱', '페미닌', '섹시', '젠더리스/젠더플루이드', '매스큘린', '톰보이',
+                    '히피', '오리엔탈', '웨스턴', '컨트리', '리조트', '모던',
+                    '소피스트케이티드', '아방가르드', '펑크', '키치/키덜트', '레트로',
+                    '힙합', '클래식', '프레피', '스트리트', '밀리터리', '스포티'
+                ]
             
-            # 스타일 클래스 정의 (스키마에서 추출)
-            style_classes = [
-                '로맨틱', '페미닌', '섹시', '젠더리스/젠더플루이드', '매스큘린', '톰보이',
-                '히피', '오리엔탈', '웨스턴', '컨트리', '리조트', '모던',
-                '소피스트케이티드', '아방가르드', '펑크', '키치/키덜트', '레트로',
-                '힙합', '클래식', '프레피', '스트리트', '밀리터리', '스포티'
-            ]
-            
+            print(f"  ✓ 스타일 모델 로드 완료 ({len(style_classes)}개 클래스)")
             return model, style_classes
             
         except Exception as e:
             print(f"❌ 스타일 모델 로드 실패: {e}")
+            import traceback
+            traceback.print_exc()
             return None, None
     
-    def load_category_models(self, models_dir: str):
-        """카테고리별 속성 모델 로드"""
-        models_dir = Path(models_dir)
+    def load_category_models(self, top_model_path: str, bottom_model_path: str, 
+                           outer_model_path: str, dress_model_path: str):
+        """의류별 속성 모델 로드 (새로운 구조)"""
         category_models = {}
         
-        categories = ['상의', '하의', '아우터', '원피스']
+        # 각 의류별 모델 로드
+        model_paths = {
+            '상의': top_model_path,
+            '하의': bottom_model_path, 
+            '아우터': outer_model_path,
+            '원피스': dress_model_path
+        }
         
-        for category in categories:
-            category_models[category] = {}
-            
-            # 각 속성별 모델 로드
-            attributes = ['카테고리', '색상', '핏', '소재', '기장', '소매기장', '넥라인', '프린트']
-            
-            for attribute in attributes:
-                model_file = models_dir / f"best_model_{category}_{attribute}.pth"
-                info_file = models_dir / f"model_info_{category}_{attribute}.json"
+        for category, model_path in model_paths.items():
+            try:
+                if not Path(model_path).exists():
+                    print(f"  ⚠️ {category} 모델 파일 없음: {model_path}")
+                    continue
                 
-                if model_file.exists() and info_file.exists():
-                    try:
-                        # 모델 정보 로드
-                        with open(info_file, 'r', encoding='utf-8') as f:
-                            model_info = json.load(f)
-                        
-                        # 모델 로드
-                        model = CategoryAttributeCNN(model_info['num_classes'])
-                        model.load_state_dict(torch.load(model_file, map_location=DEVICE))
-                        model.to(DEVICE)
-                        model.eval()
-                        
-                        category_models[category][attribute] = {
-                            'model': model,
-                            'num_classes': model_info['num_classes'],
-                            'class_names': model_info['class_names']
-                        }
-                        
-                        print(f"  ✓ {category}_{attribute} 모델 로드 완료")
-                        
-                    except Exception as e:
-                        print(f"  ❌ {category}_{attribute} 모델 로드 실패: {e}")
-                        continue
-                else:
-                    print(f"  ⚠️ {category}_{attribute} 모델 파일 없음")
+                # 체크포인트 로드
+                checkpoint = torch.load(model_path, map_location=DEVICE, weights_only=False)
+                
+                # 모델 구조 및 인코더 정보 추출
+                encoders = checkpoint.get('encoders', {})
+                schema = checkpoint.get('schema', {})
+                
+                # 각 의류별 속성 정의
+                if category == '상의':
+                    attributes = ['category', 'color', 'material', 'print', 'fit', 'style', 'sleeve']
+                elif category == '하의':
+                    attributes = ['category', 'color', 'material', 'print', 'fit', 'style', 'length']
+                elif category == '아우터':
+                    attributes = ['category', 'color', 'material', 'print', 'fit', 'style', 'sleeve']
+                elif category == '원피스':
+                    attributes = ['category', 'color', 'material', 'print', 'style']
+                
+                category_models[category] = {
+                    'model': None,  # 실제 모델은 predict_category_attributes에서 로드
+                    'checkpoint': checkpoint,
+                    'encoders': encoders,
+                    'schema': schema,
+                    'attributes': attributes
+                }
+                
+                print(f"  ✓ {category} 모델 로드 완료 ({len(attributes)}개 속성)")
+                
+            except Exception as e:
+                print(f"  ❌ {category} 모델 로드 실패: {e}")
+                continue
         
         return category_models
     
@@ -238,7 +281,7 @@ class FashionPipeline:
         return result
     
     def predict_category_attributes(self, category: str, cropped_image: np.ndarray) -> Dict:
-        """특정 카테고리의 속성 예측"""
+        """특정 카테고리의 속성 예측 (새로운 구조)"""
         print(f"  [3/7] {category} 속성 예측 중...")
         
         if category not in self.category_models:
@@ -250,31 +293,514 @@ class FashionPipeline:
         
         attributes = {}
         
-        # 각 속성별 예측
-        for attribute, model_info in self.category_models[category].items():
-            try:
-                model = model_info['model']
-                class_names = model_info['class_names']
+        try:
+            # 체크포인트에서 모델 정보 가져오기
+            model_info = self.category_models[category]
+            checkpoint = model_info['checkpoint']
+            encoders = model_info['encoders']
+            attributes_list = model_info['attributes']
+            
+            # 모델 구조 재구성 (학습 시와 동일한 구조)
+            if category == '상의':
+                model = self._create_top_model(encoders)
+            elif category == '하의':
+                model = self._create_bottom_model(encoders)
+            elif category == '아우터':
+                model = self._create_outer_model(encoders)
+            elif category == '원피스':
+                model = self._create_dress_model(encoders)
+            
+            # 모델 가중치 로드
+            model.load_state_dict(checkpoint['model_state_dict'])
+            model.to(DEVICE)
+            model.eval()
+            
+            # 예측 수행
+            with torch.no_grad():
+                outputs = model(image_tensor)
                 
-                with torch.no_grad():
-                    outputs = model(image_tensor)
-                    probs = torch.softmax(outputs, dim=1)[0]
-                    pred_idx = probs.argmax().item()
-                    confidence = probs[pred_idx].item()
-                    predicted_class = class_names[pred_idx]
-                    
-                    attributes[attribute] = {
-                        'value': predicted_class,
-                        'confidence': confidence
-                    }
-                    
-                    print(f"    - {attribute}: {predicted_class} ({confidence:.2f})")
-                    
-            except Exception as e:
-                print(f"    ❌ {category}_{attribute} 예측 실패: {e}")
-                continue
+                # 각 속성별 예측 결과 처리
+                for attr in attributes_list:
+                    if attr in outputs:
+                        attr_output = outputs[attr]
+                        probs = torch.softmax(attr_output, dim=1)[0]
+                        pred_idx = probs.argmax().item()
+                        confidence = probs[pred_idx].item()
+                        
+                        # 인코더로 디코딩
+                        predicted_class = encoders[attr].inverse_transform([pred_idx])[0]
+                        
+                        attributes[attr] = {
+                            'value': predicted_class,
+                            'confidence': confidence
+                        }
+                        
+                        print(f"    - {attr}: {predicted_class} ({confidence:.2f})")
+            
+        except Exception as e:
+            print(f"    ❌ {category} 속성 예측 실패: {e}")
+            import traceback
+            traceback.print_exc()
         
         return attributes
+    
+    def _create_top_model(self, encoders):
+        """상의 모델 생성"""
+        from torchvision import models
+        import torch.nn as nn
+        
+        class TopFashionModel(nn.Module):
+            def __init__(self, num_category, num_color, num_material, num_print, num_fit, num_style, num_sleeve):
+                super(TopFashionModel, self).__init__()
+                
+                # EfficientNet-B0를 백본으로 사용
+                self.backbone = models.efficientnet_b0(pretrained=True)
+                
+                # 특징 추출기 (마지막 분류층 제거)
+                self.features = nn.Sequential(*list(self.backbone.children())[:-1])
+                
+                # 특징 차원
+                feature_dim = 1280
+                
+                # 공유 특징 변환층
+                self.shared_fc = nn.Sequential(
+                    nn.Flatten(),
+                    nn.Linear(feature_dim, 512),
+                    nn.ReLU(),
+                    nn.Dropout(0.3)
+                )
+                
+                # 각 태스크별 헤드
+                self.category_head = nn.Sequential(
+                    nn.Linear(512, 256),
+                    nn.ReLU(),
+                    nn.Dropout(0.2),
+                    nn.Linear(256, num_category)
+                )
+                
+                self.color_head = nn.Sequential(
+                    nn.Linear(512, 256),
+                    nn.ReLU(),
+                    nn.Dropout(0.2),
+                    nn.Linear(256, num_color)
+                )
+                
+                self.material_head = nn.Sequential(
+                    nn.Linear(512, 256),
+                    nn.ReLU(),
+                    nn.Dropout(0.2),
+                    nn.Linear(256, num_material)
+                )
+                
+                self.print_head = nn.Sequential(
+                    nn.Linear(512, 256),
+                    nn.ReLU(),
+                    nn.Dropout(0.2),
+                    nn.Linear(256, num_print)
+                )
+                
+                self.fit_head = nn.Sequential(
+                    nn.Linear(512, 256),
+                    nn.ReLU(),
+                    nn.Dropout(0.2),
+                    nn.Linear(256, num_fit)
+                )
+                
+                self.style_head = nn.Sequential(
+                    nn.Linear(512, 256),
+                    nn.ReLU(),
+                    nn.Dropout(0.2),
+                    nn.Linear(256, num_style)
+                )
+                
+                self.sleeve_head = nn.Sequential(
+                    nn.Linear(512, 256),
+                    nn.ReLU(),
+                    nn.Dropout(0.2),
+                    nn.Linear(256, num_sleeve)
+                )
+            
+            def forward(self, x):
+                # 공유 특징 추출
+                features = self.features(x)
+                shared_features = self.shared_fc(features)
+                
+                # 각 태스크별 예측
+                category_out = self.category_head(shared_features)
+                color_out = self.color_head(shared_features)
+                material_out = self.material_head(shared_features)
+                print_out = self.print_head(shared_features)
+                fit_out = self.fit_head(shared_features)
+                style_out = self.style_head(shared_features)
+                sleeve_out = self.sleeve_head(shared_features)
+                
+                return {
+                    'category': category_out,
+                    'color': color_out,
+                    'material': material_out,
+                    'print': print_out,
+                    'fit': fit_out,
+                    'style': style_out,
+                    'sleeve': sleeve_out
+                }
+        
+        return TopFashionModel(
+            num_category=len(encoders['category'].classes_),
+            num_color=len(encoders['color'].classes_),
+            num_material=len(encoders['material'].classes_),
+            num_print=len(encoders['print'].classes_),
+            num_fit=len(encoders['fit'].classes_),
+            num_style=len(encoders['style'].classes_),
+            num_sleeve=len(encoders['sleeve'].classes_)
+        )
+    
+    def _create_bottom_model(self, encoders):
+        """하의 모델 생성"""
+        from torchvision import models
+        import torch.nn as nn
+        
+        class BottomFashionModel(nn.Module):
+            def __init__(self, num_category, num_color, num_material, num_print, num_fit, num_style, num_length):
+                super(BottomFashionModel, self).__init__()
+                
+                # EfficientNet-B0를 백본으로 사용
+                self.backbone = models.efficientnet_b0(pretrained=True)
+                
+                # 특징 추출기 (마지막 분류층 제거)
+                self.features = nn.Sequential(*list(self.backbone.children())[:-1])
+                
+                # 특징 차원
+                feature_dim = 1280
+                
+                # 공유 특징 변환층
+                self.shared_fc = nn.Sequential(
+                    nn.Flatten(),
+                    nn.Linear(feature_dim, 512),
+                    nn.ReLU(),
+                    nn.Dropout(0.3)
+                )
+                
+                # 각 태스크별 헤드
+                self.category_head = nn.Sequential(
+                    nn.Linear(512, 256),
+                    nn.ReLU(),
+                    nn.Dropout(0.2),
+                    nn.Linear(256, num_category)
+                )
+                
+                self.color_head = nn.Sequential(
+                    nn.Linear(512, 256),
+                    nn.ReLU(),
+                    nn.Dropout(0.2),
+                    nn.Linear(256, num_color)
+                )
+                
+                self.material_head = nn.Sequential(
+                    nn.Linear(512, 256),
+                    nn.ReLU(),
+                    nn.Dropout(0.2),
+                    nn.Linear(256, num_material)
+                )
+                
+                self.print_head = nn.Sequential(
+                    nn.Linear(512, 256),
+                    nn.ReLU(),
+                    nn.Dropout(0.2),
+                    nn.Linear(256, num_print)
+                )
+                
+                self.fit_head = nn.Sequential(
+                    nn.Linear(512, 256),
+                    nn.ReLU(),
+                    nn.Dropout(0.2),
+                    nn.Linear(256, num_fit)
+                )
+                
+                self.style_head = nn.Sequential(
+                    nn.Linear(512, 256),
+                    nn.ReLU(),
+                    nn.Dropout(0.2),
+                    nn.Linear(256, num_style)
+                )
+                
+                self.length_head = nn.Sequential(
+                    nn.Linear(512, 256),
+                    nn.ReLU(),
+                    nn.Dropout(0.2),
+                    nn.Linear(256, num_length)
+                )
+            
+            def forward(self, x):
+                # 공유 특징 추출
+                features = self.features(x)
+                shared_features = self.shared_fc(features)
+                
+                # 각 태스크별 예측
+                category_out = self.category_head(shared_features)
+                color_out = self.color_head(shared_features)
+                material_out = self.material_head(shared_features)
+                print_out = self.print_head(shared_features)
+                fit_out = self.fit_head(shared_features)
+                style_out = self.style_head(shared_features)
+                length_out = self.length_head(shared_features)
+                
+                return {
+                    'category': category_out,
+                    'color': color_out,
+                    'material': material_out,
+                    'print': print_out,
+                    'fit': fit_out,
+                    'style': style_out,
+                    'length': length_out
+                }
+        
+        return BottomFashionModel(
+            num_category=len(encoders['category'].classes_),
+            num_color=len(encoders['color'].classes_),
+            num_material=len(encoders['material'].classes_),
+            num_print=len(encoders['print'].classes_),
+            num_fit=len(encoders['fit'].classes_),
+            num_style=len(encoders['style'].classes_),
+            num_length=len(encoders['length'].classes_)
+        )
+    
+    def _create_outer_model(self, encoders):
+        """아우터 모델 생성"""
+        from torchvision import models
+        import torch.nn as nn
+        
+        class OuterFashionModel(nn.Module):
+            def __init__(self, num_category, num_color, num_material, num_print, num_fit, num_style, num_sleeve):
+                super(OuterFashionModel, self).__init__()
+                
+                # EfficientNet-B0를 백본으로 사용
+                self.backbone = models.efficientnet_b0(pretrained=True)
+                
+                # 특징 추출기 (마지막 분류층 제거)
+                self.features = nn.Sequential(*list(self.backbone.children())[:-1])
+                
+                # 특징 차원
+                feature_dim = 1280
+                
+                # 공유 특징 변환층
+                self.shared_fc = nn.Sequential(
+                    nn.Flatten(),
+                    nn.Linear(feature_dim, 512),
+                    nn.ReLU(),
+                    nn.Dropout(0.3)
+                )
+                
+                # 각 태스크별 헤드
+                self.category_head = nn.Sequential(
+                    nn.Linear(512, 256),
+                    nn.ReLU(),
+                    nn.Dropout(0.2),
+                    nn.Linear(256, num_category)
+                )
+                
+                self.color_head = nn.Sequential(
+                    nn.Linear(512, 256),
+                    nn.ReLU(),
+                    nn.Dropout(0.2),
+                    nn.Linear(256, num_color)
+                )
+                
+                self.material_head = nn.Sequential(
+                    nn.Linear(512, 256),
+                    nn.ReLU(),
+                    nn.Dropout(0.2),
+                    nn.Linear(256, num_material)
+                )
+                
+                self.print_head = nn.Sequential(
+                    nn.Linear(512, 256),
+                    nn.ReLU(),
+                    nn.Dropout(0.2),
+                    nn.Linear(256, num_print)
+                )
+                
+                self.fit_head = nn.Sequential(
+                    nn.Linear(512, 256),
+                    nn.ReLU(),
+                    nn.Dropout(0.2),
+                    nn.Linear(256, num_fit)
+                )
+                
+                self.style_head = nn.Sequential(
+                    nn.Linear(512, 256),
+                    nn.ReLU(),
+                    nn.Dropout(0.2),
+                    nn.Linear(256, num_style)
+                )
+                
+                self.sleeve_head = nn.Sequential(
+                    nn.Linear(512, 256),
+                    nn.ReLU(),
+                    nn.Dropout(0.2),
+                    nn.Linear(256, num_sleeve)
+                )
+            
+            def forward(self, x):
+                # 공유 특징 추출
+                features = self.features(x)
+                shared_features = self.shared_fc(features)
+                
+                # 각 태스크별 예측
+                category_out = self.category_head(shared_features)
+                color_out = self.color_head(shared_features)
+                material_out = self.material_head(shared_features)
+                print_out = self.print_head(shared_features)
+                fit_out = self.fit_head(shared_features)
+                style_out = self.style_head(shared_features)
+                sleeve_out = self.sleeve_head(shared_features)
+                
+                return {
+                    'category': category_out,
+                    'color': color_out,
+                    'material': material_out,
+                    'print': print_out,
+                    'fit': fit_out,
+                    'style': style_out,
+                    'sleeve': sleeve_out
+                }
+        
+        return OuterFashionModel(
+            num_category=len(encoders['category'].classes_),
+            num_color=len(encoders['color'].classes_),
+            num_material=len(encoders['material'].classes_),
+            num_print=len(encoders['print'].classes_),
+            num_fit=len(encoders['fit'].classes_),
+            num_style=len(encoders['style'].classes_),
+            num_sleeve=len(encoders['sleeve'].classes_)
+        )
+    
+    def _create_dress_model(self, encoders):
+        """드레스 모델 생성"""
+        from torchvision import models
+        import torch.nn as nn
+        
+        class DressFashionModel(nn.Module):
+            def __init__(self, num_category, num_color, num_material, num_print, num_style):
+                super(DressFashionModel, self).__init__()
+                
+                # EfficientNet-B0를 백본으로 사용
+                self.backbone = models.efficientnet_b0(pretrained=True)
+                
+                # 특징 추출기 (마지막 분류층 제거)
+                self.features = nn.Sequential(*list(self.backbone.children())[:-1])
+                
+                # 특징 차원
+                feature_dim = 1280
+                
+                # 공유 특징 변환층
+                self.shared_fc = nn.Sequential(
+                    nn.Flatten(),
+                    nn.Linear(feature_dim, 512),
+                    nn.ReLU(),
+                    nn.Dropout(0.3)
+                )
+                
+                # 각 태스크별 헤드
+                self.category_head = nn.Sequential(
+                    nn.Linear(512, 256),
+                    nn.ReLU(),
+                    nn.Dropout(0.2),
+                    nn.Linear(256, num_category)
+                )
+                
+                self.color_head = nn.Sequential(
+                    nn.Linear(512, 256),
+                    nn.ReLU(),
+                    nn.Dropout(0.2),
+                    nn.Linear(256, num_color)
+                )
+                
+                self.material_head = nn.Sequential(
+                    nn.Linear(512, 256),
+                    nn.ReLU(),
+                    nn.Dropout(0.2),
+                    nn.Linear(256, num_material)
+                )
+                
+                self.print_head = nn.Sequential(
+                    nn.Linear(512, 256),
+                    nn.ReLU(),
+                    nn.Dropout(0.2),
+                    nn.Linear(256, num_print)
+                )
+                
+                self.style_head = nn.Sequential(
+                    nn.Linear(512, 256),
+                    nn.ReLU(),
+                    nn.Dropout(0.2),
+                    nn.Linear(256, num_style)
+                )
+            
+            def forward(self, x):
+                # 공유 특징 추출
+                features = self.features(x)
+                shared_features = self.shared_fc(features)
+                
+                # 각 태스크별 예측
+                category_out = self.category_head(shared_features)
+                color_out = self.color_head(shared_features)
+                material_out = self.material_head(shared_features)
+                print_out = self.print_head(shared_features)
+                style_out = self.style_head(shared_features)
+                
+                return {
+                    'category': category_out,
+                    'color': color_out,
+                    'material': material_out,
+                    'print': print_out,
+                    'style': style_out
+                }
+        
+        return DressFashionModel(
+            num_category=len(encoders['category'].classes_),
+            num_color=len(encoders['color'].classes_),
+            num_material=len(encoders['material'].classes_),
+            num_print=len(encoders['print'].classes_),
+            num_style=len(encoders['style'].classes_)
+        )
+    
+    def _create_kfashion_model(self, num_classes):
+        """KFashionModel 커스텀 모델 생성"""
+        from torchvision import models
+        import torch.nn as nn
+        
+        class KFashionModel(nn.Module):
+            def __init__(self, num_classes):
+                super(KFashionModel, self).__init__()
+                
+                # EfficientNet-B0 백본
+                self.backbone = models.efficientnet_b0(weights='IMAGENET1K_V1')
+                
+                # 백본의 일부 레이어 고정 (Fine-tuning)
+                # EfficientNet의 features 부분에서 앞쪽 레이어들 고정
+                for i, param in enumerate(self.backbone.features.parameters()):
+                    if i < 100:  # 앞쪽 파라미터들 고정
+                        param.requires_grad = False
+                
+                # Classifier 교체
+                in_features = self.backbone.classifier[1].in_features
+                self.backbone.classifier = nn.Sequential(
+                    nn.BatchNorm1d(in_features),
+                    nn.Dropout(0.5),
+                    nn.Linear(in_features, 512),
+                    nn.ReLU(),
+                    nn.BatchNorm1d(512),
+                    nn.Dropout(0.3),
+                    nn.Linear(512, 256),
+                    nn.ReLU(),
+                    nn.Dropout(0.2),
+                    nn.Linear(256, num_classes)
+                )
+            
+            def forward(self, x):
+                return self.backbone(x)
+        
+        return KFashionModel(num_classes)
     
     def reconnect_db(self):
         """데이터베이스 연결 재시도"""
@@ -301,9 +827,38 @@ class FashionPipeline:
             raise ValueError(f"이미지를 열 수 없습니다: {image_path}")
         
         image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        print(f"  📏 이미지 크기: {image_rgb.shape}")
         
         # YOLO Detection 추론
-        results = self.yolo_detection_model(image_path, verbose=False)
+        try:
+            results = self.yolo_detection_model(image_path, verbose=False)
+            print(f"  🔍 YOLO 결과: {len(results[0].boxes)}개 박스 감지")
+            
+            # YOLO 결과 상세 정보 출력
+            if len(results[0].boxes) > 0:
+                print(f"  📊 박스 정보:")
+                for i, box in enumerate(results[0].boxes):
+                    class_id = int(box.cls[0])
+                    confidence = float(box.conf[0])
+                    x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+                    print(f"    박스 {i}: class_id={class_id}, confidence={confidence:.3f}, bbox=({x1:.1f},{y1:.1f},{x2:.1f},{y2:.1f})")
+            else:
+                print("  ❌ YOLO가 아무것도 감지하지 못했습니다!")
+                print("  💡 가능한 원인:")
+                print("    - 이미지에 의류가 명확하지 않음")
+                print("    - YOLO 모델이 해당 이미지를 인식하지 못함")
+                print("    - confidence threshold가 너무 높음")
+                
+        except Exception as e:
+            print(f"  ❌ YOLO 추론 실패: {e}")
+            return {
+                'original': image_rgb,
+                'detected_items': {},
+                'has_상의': False,
+                'has_하의': False,
+                'has_아우터': False,
+                'has_원피스': False
+            }
         
         detected_items = {
             '상의': [],
@@ -312,8 +867,8 @@ class FashionPipeline:
             '원피스': []
         }
         
-        # 클래스 이름 매핑
-        class_names = ['아우터', '상의', '하의', '원피스']
+        # 클래스 이름 매핑 (YOLO 모델의 실제 클래스 순서)
+        class_names = ['outer', 'top', 'bottom', 'dress']  # 영어로 수정
         category_mapping = {
             'outer': '아우터',
             'top': '상의',
@@ -323,30 +878,51 @@ class FashionPipeline:
         
         if len(results[0].boxes) > 0:
             boxes = results[0].boxes
+            print(f"  📦 감지된 박스 개수: {len(boxes)}")
+            
             for i, box in enumerate(boxes):
                 class_id = int(box.cls[0])
                 confidence = float(box.conf[0])
                 
-                # confidence 0.5 이상만 처리
-                if confidence >= 0.5 and class_id < len(class_names):
+                print(f"    박스 {i}: class_id={class_id}, confidence={confidence:.3f}")
+                
+                # confidence 0.3으로 낮춤 (더 많은 감지 허용)
+                if confidence >= 0.3 and class_id < len(class_names):
                     class_name_en = class_names[class_id]
                     class_name_ko = category_mapping.get(class_name_en)
+                    
+                    print(f"    → 클래스: {class_name_en} → {class_name_ko}")
                     
                     if class_name_ko:
                         # 바운딩 박스 좌표
                         x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
                         x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
                         
-                        # 이미지 크롭
-                        cropped_image = image_rgb[y1:y2, x1:x2]
+                        print(f"    → 바운딩 박스: ({x1},{y1},{x2},{y2})")
                         
-                        detected_items[class_name_ko].append({
-                            'bbox': (x1, y1, x2, y2),
-                            'confidence': confidence,
-                            'cropped_image': cropped_image
-                        })
-                        
-                        print(f"  - {class_name_ko}: confidence={confidence:.2f}, bbox=({x1},{y1},{x2},{y2})")
+                        # 바운딩 박스 유효성 검사
+                        if x1 >= 0 and y1 >= 0 and x2 > x1 and y2 > y1 and x2 <= image_rgb.shape[1] and y2 <= image_rgb.shape[0]:
+                            # 이미지 크롭
+                            cropped_image = image_rgb[y1:y2, x1:x2]
+                            
+                            if cropped_image.size > 0:
+                                detected_items[class_name_ko].append({
+                                    'bbox': (x1, y1, x2, y2),
+                                    'confidence': confidence,
+                                    'cropped_image': cropped_image
+                                })
+                                
+                                print(f"  ✅ {class_name_ko}: confidence={confidence:.2f}, 크롭 크기={cropped_image.shape}")
+                            else:
+                                print(f"  ❌ {class_name_ko}: 크롭된 이미지가 비어있음")
+                        else:
+                            print(f"  ❌ {class_name_ko}: 유효하지 않은 바운딩 박스")
+                    else:
+                        print(f"  ❌ 클래스 매핑 실패: {class_name_en}")
+                else:
+                    print(f"  ❌ 박스 {i}: confidence={confidence:.3f} < 0.3 또는 class_id={class_id} >= {len(class_names)}")
+        else:
+            print("  ❌ 감지된 박스가 없습니다!")
         
         # 각 카테고리별로 가장 높은 confidence 선택
         final_items = {}
@@ -355,6 +931,23 @@ class FashionPipeline:
                 best_item = max(items, key=lambda x: x['confidence'])
                 final_items[category] = best_item
                 print(f"  ✅ {category} 선택: confidence={best_item['confidence']:.2f}")
+        
+        # YOLO 감지 실패 시 임시 해결책: 전체 이미지를 모든 카테고리로 사용
+        if not final_items:
+            print("  ⚠️ YOLO 감지 실패 - 전체 이미지를 모든 카테고리로 사용")
+            final_items = {
+                '상의': {
+                    'bbox': (0, 0, image_rgb.shape[1], image_rgb.shape[0]),
+                    'confidence': 0.5,
+                    'cropped_image': image_rgb
+                },
+                '하의': {
+                    'bbox': (0, 0, image_rgb.shape[1], image_rgb.shape[0]),
+                    'confidence': 0.5,
+                    'cropped_image': image_rgb
+                }
+            }
+            print("  🔧 임시 해결책 적용: 상의, 하의로 분류")
         
         return {
             'original': image_rgb,
@@ -424,38 +1017,88 @@ class FashionPipeline:
                 
                 item_id = cur.fetchone()[0]
                 
-                # 각 카테고리별 속성 저장
+                # 각 카테고리별 속성 저장 (새로운 구조)
                 for category, attributes in category_attributes.items():
                     if attributes:
-                        # 카테고리별 테이블에 저장
-                        table_name = f"{category.lower()}_attributes"
+                        # 카테고리별 테이블에 저장 (영어 테이블명 사용)
+                        category_mapping = {
+                            '상의': 'top_attributes_new',
+                            '하의': 'bottom_attributes_new', 
+                            '아우터': 'outer_attributes_new',
+                            '원피스': 'dress_attributes_new'
+                        }
+                        table_name = category_mapping.get(category, f"{category.lower()}_attributes")
                         
-                        # 속성 값 추출
-                        category_val = attributes.get('카테고리', {}).get('value', 'Unknown')
-                        color_val = attributes.get('색상', {}).get('value', 'Unknown')
-                        fit_val = attributes.get('핏', {}).get('value', 'Unknown')
-                        material_val = attributes.get('소재', {}).get('value', 'Unknown')
-                        length_val = attributes.get('기장', {}).get('value', 'Unknown')
-                        sleeve_length_val = attributes.get('소매기장', {}).get('value', 'Unknown')
-                        neckline_val = attributes.get('넥라인', {}).get('value', 'Unknown')
-                        print_val = attributes.get('프린트', {}).get('value', 'Unknown')
+                        print(f"  💾 {category} 속성 저장 중... (테이블: {table_name})")
+                        print(f"    - 속성 개수: {len(attributes)}")
+                        for attr_name, attr_data in attributes.items():
+                            print(f"    - {attr_name}: {attr_data.get('value', 'Unknown')} ({attr_data.get('confidence', 0.0):.2f})")
+                        
+                        # 기본 속성 값 추출 (모든 카테고리 공통)
+                        category_val = attributes.get('category', {}).get('value', 'Unknown')
+                        color_val = attributes.get('color', {}).get('value', 'Unknown')
+                        material_val = attributes.get('material', {}).get('value', 'Unknown')
+                        print_val = attributes.get('print', {}).get('value', 'Unknown')
+                        style_val = attributes.get('style', {}).get('value', 'Unknown')
+                        
+                        # 카테고리별 특수 속성
+                        fit_val = attributes.get('fit', {}).get('value', 'Unknown')
+                        sleeve_val = attributes.get('sleeve', {}).get('value', 'Unknown')
+                        length_val = attributes.get('length', {}).get('value', 'Unknown')
                         
                         # 신뢰도 추출
-                        category_conf = attributes.get('카테고리', {}).get('confidence', 0.0)
-                        color_conf = attributes.get('색상', {}).get('confidence', 0.0)
-                        fit_conf = attributes.get('핏', {}).get('confidence', 0.0)
+                        category_conf = attributes.get('category', {}).get('confidence', 0.0)
+                        color_conf = attributes.get('color', {}).get('confidence', 0.0)
+                        fit_conf = attributes.get('fit', {}).get('confidence', 0.0)
                         
-                        cur.execute(f"""
-                            INSERT INTO {table_name} (
-                                item_id, category, color, fit, material, length,
-                                sleeve_length, neckline, print_pattern,
-                                category_confidence, color_confidence, fit_confidence
-                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        """, (
-                            item_id, category_val, color_val, fit_val, material_val,
-                            length_val, sleeve_length_val, neckline_val, print_val,
-                            category_conf, color_conf, fit_conf
-                        ))
+                        # 카테고리별로 다른 필드 저장
+                        if category == '상의':
+                            cur.execute(f"""
+                                INSERT INTO {table_name} (
+                                    item_id, category, color, fit, material, print_pattern, style, sleeve_length,
+                                    category_confidence, color_confidence, fit_confidence
+                                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            """, (
+                                item_id, category_val, color_val, fit_val, material_val, print_val, style_val, sleeve_val,
+                                category_conf, color_conf, fit_conf
+                            ))
+                        elif category == '하의':
+                            cur.execute(f"""
+                                INSERT INTO {table_name} (
+                                    item_id, category, color, fit, material, print_pattern, style, length,
+                                    category_confidence, color_confidence, fit_confidence
+                                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            """, (
+                                item_id, category_val, color_val, fit_val, material_val, print_val, style_val, length_val,
+                                category_conf, color_conf, fit_conf
+                            ))
+                        elif category == '아우터':
+                            print(f"    📝 아우터 INSERT 실행: {table_name}")
+                            print(f"    📊 값들: item_id={item_id}, category={category_val}, color={color_val}, material={material_val}")
+                            try:
+                                cur.execute(f"""
+                                    INSERT INTO {table_name} (
+                                        item_id, category, color, fit, material, print_pattern, style, sleeve_length,
+                                        category_confidence, color_confidence, fit_confidence
+                                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                """, (
+                                    item_id, category_val, color_val, fit_val, material_val, print_val, style_val, sleeve_val,
+                                    category_conf, color_conf, fit_conf
+                                ))
+                                print(f"    ✅ 아우터 INSERT 성공!")
+                            except Exception as e:
+                                print(f"    ❌ 아우터 INSERT 실패: {e}")
+                                raise e
+                        elif category == '원피스':
+                            cur.execute(f"""
+                                INSERT INTO {table_name} (
+                                    item_id, category, color, material, print_pattern, style,
+                                    category_confidence, color_confidence
+                                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                            """, (
+                                item_id, category_val, color_val, material_val, print_val, style_val,
+                                category_conf, color_conf
+                            ))
                 
                 self.db_conn.commit()
                 
@@ -483,9 +1126,9 @@ class FashionPipeline:
         if metadata.get('style'):
             doc_parts.append(f"스타일: {metadata['style']}")
         
-        for category in ['상의', '하의', '아우터', '원피스']:
-            if metadata.get(f'{category}_category'):
-                doc_parts.append(f"{category}: {metadata[f'{category}_category']}")
+        for category_en, category_ko in [('top', '상의'), ('bottom', '하의'), ('outer', '아우터'), ('dress', '원피스')]:
+            if metadata.get(f'{category_en}_category'):
+                doc_parts.append(f"{category_ko}: {metadata[f'{category_en}_category']}")
         
         document = " | ".join(doc_parts)
         
@@ -583,8 +1226,10 @@ class FashionPipeline:
             
             for category, attributes in category_attributes.items():
                 for attr_name, attr_data in attributes.items():
-                    metadata[f'{category}_{attr_name}'] = attr_data['value']
-                    metadata[f'{category}_{attr_name}_confidence'] = attr_data['confidence']
+                    # 카테고리명을 영어로 변환
+                    category_en = {'상의': 'top', '하의': 'bottom', '아우터': 'outer', '원피스': 'dress'}[category]
+                    metadata[f'{category_en}_{attr_name}'] = attr_data['value']
+                    metadata[f'{category_en}_{attr_name}_confidence'] = attr_data['confidence']
             
             # 6. PostgreSQL 저장
             item_id = self.save_to_postgresql(

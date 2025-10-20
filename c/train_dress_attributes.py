@@ -475,7 +475,7 @@ def train_model(model, train_loader, val_loader, device, encoders, schema, outpu
 
 def main():
     # 설정
-    base_path = r'D:\converted_data\prepared_data'
+    base_path = r'D:/prepared_data'
     schema_path = r'D:\kkokkaot\API\kfashion_attributes_schema.csv'
     output_dir = r'D:\kkokkaot\models\dress'
     target_category = '원피스'
@@ -495,7 +495,7 @@ def main():
     
     # 데이터 준비 (샘플링)
     print("\n데이터 준비 중...")
-    sample_size = 1000  # 1 epoch 테스트를 위해 1000개 샘플링
+    sample_size = 16000  # 1 epoch 테스트를 위해 1000개 샘플링
     data_list, encoders = prepare_data(base_path, schema, target_category, sample_size=sample_size)
     
     if data_list is None:
@@ -533,7 +533,7 @@ def main():
     
     # 모델 학습
     print("\n학습 시작...")
-    train_model(model, train_loader, val_loader, device, encoders, schema, output_dir, num_epochs=1)
+    train_model(model, train_loader, val_loader, device, encoders, schema, output_dir, num_epochs=50)
     
     print(f"\n✓ 모든 가중치가 {output_dir} 폴더에 저장되었습니다.")
     print(f"  - best_model.pth: 최고 성능 모델")
