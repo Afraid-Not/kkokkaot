@@ -20,17 +20,17 @@ def select_random_images(source_dir, target_dir, count=150):
     for ext in image_extensions:
         all_images.extend(source_path.glob(f"*{ext}"))
     
-    print(f"📁 소스 디렉토리에서 {len(all_images)}개의 이미지 파일 발견")
+    print(f"소스 디렉토리에서 {len(all_images)}개의 이미지 파일 발견")
     
     if len(all_images) < count:
-        print(f"❌ 요청한 개수({count})보다 적은 이미지({len(all_images)})가 있습니다.")
-        print(f"💡 사용 가능한 모든 이미지({len(all_images)})를 복사합니다.")
+        print(f"요청한 개수({count})보다 적은 이미지({len(all_images)})가 있습니다.")
+        print(f"사용 가능한 모든 이미지({len(all_images)})를 복사합니다.")
         count = len(all_images)
     
     # 랜덤하게 선택
     selected_images = random.sample(all_images, count)
     
-    print(f"🎲 {count}개의 이미지를 랜덤하게 선택했습니다.")
+    print(f"{count}개의 이미지를 랜덤하게 선택했습니다.")
     
     # 복사 시작
     copied_count = 0
@@ -53,13 +53,13 @@ def select_random_images(source_dir, target_dir, count=150):
             copied_count += 1
             
             if i % 10 == 0 or i == count:
-                print(f"📸 진행률: {i}/{count} ({i/count*100:.1f}%) - {image_path.name}")
+                print(f"진행률: {i}/{count} ({i/count*100:.1f}%) - {image_path.name}")
                 
         except Exception as e:
-            print(f"❌ 복사 실패: {image_path.name} - {e}")
+            print(f"복사 실패: {image_path.name} - {e}")
     
-    print(f"\n✅ 완료! {copied_count}개의 이미지가 복사되었습니다.")
-    print(f"📁 복사된 위치: {target_path}")
+    print(f"\n완료! {copied_count}개의 이미지가 복사되었습니다.")
+    print(f"복사된 위치: {target_path}")
     
     return copied_count
 
@@ -69,13 +69,13 @@ if __name__ == "__main__":
     target_directory = r"D:\kkokkaot\default_items"
     image_count = 150
     
-    print("🎯 랜덤 이미지 선택 시작")
-    print(f"📂 소스: {source_directory}")
-    print(f"📂 타겟: {target_directory}")
-    print(f"🎲 개수: {image_count}개")
+    print("랜덤 이미지 선택 시작")
+    print(f"소스: {source_directory}")
+    print(f"타겟: {target_directory}")
+    print(f"개수: {image_count}개")
     print("-" * 50)
     
     # 실행
     copied = select_random_images(source_directory, target_directory, image_count)
     
-    print(f"\n🎉 작업 완료! {copied}개의 이미지가 default_items 폴더에 저장되었습니다.")
+    print(f"\n작업 완료! {copied}개의 이미지가 default_items 폴더에 저장되었습니다.")
