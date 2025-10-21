@@ -22,7 +22,7 @@ import BottomNavBar from '../common/BottomNavBar';
 
 type NavigationStep =
   | 'home'
-  | 'today-curation'
+  | 'today-curation' 
   | 'daily-outfit'
   | 'wardrobe-management'
   | 'style-analysis'

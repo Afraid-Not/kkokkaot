@@ -599,7 +599,7 @@ export default function DailyOutfitRecommendation({
     }
   };
 
-  if (loading) {
+  if (loading) { 
     return (
       <SafeAreaView style={styles.safe}>
         <AppHeader title="AI 코디 분석" onBack={onBack} />
