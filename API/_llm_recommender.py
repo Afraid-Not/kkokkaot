@@ -109,6 +109,8 @@ class LLMRecommender:
         
         # 7. 선택된 아이템 기반 추천 확인
         is_recommendation_request = self._is_recommendation_request(user_message)
+        print(f"\n🔍 추천 요청 여부: {is_recommendation_request}")
+        print(f"🔍 선택된 아이템 존재: {bool(selected_item_ids)}")
         
         recommendations = []
         
@@ -117,6 +119,12 @@ class LLMRecommender:
             print(f"\n🎯 선택된 아이템 기반 추천 시작...")
             recommendations = self._recommend_based_on_selected(user_id, selected_item_ids, context)
             print(f"\n✨ 추천 아이템: {len(recommendations)}개")
+            
+            if len(recommendations) == 0:
+                print(f"⚠️ 추천 결과가 없어서 대체 추천 실행...")
+                # 대체 추천: 선택된 아이템과 무관하게 추천
+                recommendations = self._get_fallback_recommendations(user_id, selected_item_ids)
+                print(f"✅ 대체 추천 아이템: {len(recommendations)}개")
         else:
             # 8. 옷장 전체 보기 요청 확인
             show_all_wardrobe = self._is_show_wardrobe_request(user_message)
@@ -144,8 +152,10 @@ class LLMRecommender:
     def _is_recommendation_request(self, user_message: str) -> bool:
         """추천 요청인지 확인"""
         msg = user_message.lower().strip()
-        keywords = ['추천', '스타일링', '패션', '코디', '어울리', '매칭', '입', '입을', '조합', '믹스매치']
-        return any(keyword in msg for keyword in keywords)
+        keywords = ['추천', '추천해', '추천해줘', '스타일링', '패션', '코디', '어울리', '매칭', '입', '입을', '조합', '믹스매치', '골라', '찾아']
+        result = any(keyword in msg for keyword in keywords)
+        print(f"🔍 추천 요청 감지: {result} (메시지: '{msg}')")
+        return result
     
     def _is_show_wardrobe_request(self, user_message: str) -> bool:
         """옷장 전체 보기 요청인지 확인"""
@@ -168,10 +178,10 @@ class LLMRecommender:
                         o.category as outer_cat, o.color as outer_color,
                         d.category as dress_cat, d.color as dress_color
                     FROM wardrobe_items w
-                    LEFT JOIN top_attributes t ON w.item_id = t.item_id
-                    LEFT JOIN bottom_attributes b ON w.item_id = b.item_id
-                    LEFT JOIN outer_attributes o ON w.item_id = o.item_id
-                    LEFT JOIN dress_attributes d ON w.item_id = d.item_id
+                    LEFT JOIN top_attributes_new t ON w.item_id = t.item_id
+                    LEFT JOIN bottom_attributes_new b ON w.item_id = b.item_id
+                    LEFT JOIN outer_attributes_new o ON w.item_id = o.item_id
+                    LEFT JOIN dress_attributes_new d ON w.item_id = d.item_id
                     WHERE w.item_id IN ({placeholders})
                 """
                 
@@ -215,17 +225,20 @@ class LLMRecommender:
                 
                 where_clause = " AND ".join(filters)
                 
+                # 👇 테이블 이름 수정: top_attributes → top_attributes_new
                 recommendation_query = f"""
-                    SELECT w.item_id, w.user_id, 
+                    SELECT w.item_id, w.user_id, w.is_default,
                            CASE WHEN w.user_id = %s THEN 0 ELSE 1 END as user_priority
                     FROM wardrobe_items w
-                    LEFT JOIN top_attributes t ON w.item_id = t.item_id
-                    LEFT JOIN bottom_attributes b ON w.item_id = b.item_id
+                    LEFT JOIN top_attributes_new t ON w.item_id = t.item_id
+                    LEFT JOIN bottom_attributes_new b ON w.item_id = b.item_id
+                    LEFT JOIN outer_attributes_new o ON w.item_id = o.item_id
+                    LEFT JOIN dress_attributes_new d ON w.item_id = d.item_id
                     WHERE (w.user_id = %s OR w.is_default = TRUE)
                       AND ({where_clause})
-                    GROUP BY w.item_id, w.user_id
+                    GROUP BY w.item_id, w.user_id, w.is_default
                     ORDER BY user_priority, w.item_id DESC
-                    LIMIT 5
+                    LIMIT 10
                 """
                 
                 cur.execute(recommendation_query, (user_id, user_id))
@@ -233,6 +246,25 @@ class LLMRecommender:
                 
                 item_ids = [row[0] for row in results]
                 print(f"✅ 추천 아이템 ID: {item_ids}")
+                print(f"  📊 사용자 아이템: {sum(1 for row in results if not row[2])}")
+                print(f"  📦 기본 아이템: {sum(1 for row in results if row[2])}")
+                
+                if len(item_ids) == 0:
+                    print(f"⚠️ 조건에 맞는 아이템이 없어서 기본 추천 실행...")
+                    # 👇 필터 없이 모든 아이템에서 추천
+                    cur.execute("""
+                        SELECT DISTINCT w.item_id
+                        FROM wardrobe_items w
+                        WHERE w.user_id = %s OR w.is_default = TRUE
+                        ORDER BY 
+                            CASE WHEN w.user_id = %s THEN 0 ELSE 1 END,
+                            w.item_id DESC
+                        LIMIT 5
+                    """, (user_id, user_id))
+                    
+                    results = cur.fetchall()
+                    item_ids = [row[0] for row in results]
+                    print(f"✅ 기본 추천 아이템 ID: {item_ids}")
                 
                 return item_ids
         
@@ -242,6 +274,55 @@ class LLMRecommender:
             traceback.print_exc()
             
             # 트랜잭션 롤백
+            try:
+                self.db_conn.rollback()
+                print("🔄 트랜잭션 롤백 완료")
+            except Exception as rollback_error:
+                print(f"⚠️ 롤백 실패: {rollback_error}")
+            
+            return []
+    
+    def _get_fallback_recommendations(self, user_id: int, exclude_ids: list = None) -> list:
+        """대체 추천: 조건 없이 모든 아이템에서 추천 (기본 아이템 포함)"""
+        try:
+            with self.db_conn.cursor() as cur:
+                if exclude_ids:
+                    placeholders = ','.join(['%s'] * len(exclude_ids))
+                    query = f"""
+                        SELECT DISTINCT w.item_id
+                        FROM wardrobe_items w
+                        WHERE (w.user_id = %s OR w.is_default = TRUE)
+                          AND w.item_id NOT IN ({placeholders})
+                        ORDER BY 
+                            CASE WHEN w.user_id = %s THEN 0 ELSE 1 END,
+                            w.item_id DESC
+                        LIMIT 8
+                    """
+                    params = [user_id] + list(exclude_ids) + [user_id]
+                else:
+                    query = """
+                        SELECT DISTINCT w.item_id
+                        FROM wardrobe_items w
+                        WHERE w.user_id = %s OR w.is_default = TRUE
+                        ORDER BY 
+                            CASE WHEN w.user_id = %s THEN 0 ELSE 1 END,
+                            w.item_id DESC
+                        LIMIT 8
+                    """
+                    params = [user_id, user_id]
+                
+                cur.execute(query, params)
+                results = cur.fetchall()
+                item_ids = [row[0] for row in results]
+                
+                print(f"  ✅ 대체 추천 아이템 ID: {item_ids}")
+                return item_ids
+        
+        except Exception as e:
+            print(f"  ❌ 대체 추천 오류: {e}")
+            import traceback
+            traceback.print_exc()
+            
             try:
                 self.db_conn.rollback()
                 print("🔄 트랜잭션 롤백 완료")
@@ -372,8 +453,8 @@ AI: "좋아! 데이트에 시원하면서 멋진 스타일 찾아줄게! 💕"
         # 옷장 관련 (전체 보기)
         if any(word in msg for word in ['옷장 보여', '옷장 보기', '옷장 전체', '내 옷 보여']):
             if wardrobe_info and '옷장:' in wardrobe_info:
-                return f"옷장을 보여드릴게요! {wardrobe_info.replace('옷장:', '')} 있네요 👗✨"
-            return "옷장을 보여드릴게요! 👗✨"
+                return f"옷장을 보여드릴게요! {wardrobe_info.replace('옷장:', '')} 있네요 👗✨\n\n💡 옷을 클릭하면 선택할 수 있어요! 선택 후 '추천해줘'라고 말씀해주세요."
+            return "옷장을 보여드릴게요! 👗✨\n\n💡 옷을 클릭하면 선택할 수 있어요!"
         
         # 옷장 관련 (개수 질문)
         if any(word in msg for word in ['몇 개', '몇개', '개수', '얼마나']):
@@ -388,7 +469,7 @@ AI: "좋아! 데이트에 시원하면서 멋진 스타일 찾아줄게! 💕"
             return "옷장을 확인해볼게요! 어떤 스타일을 찾고 계세요?"
         
         # 추천 요청
-        if any(word in msg for word in ['추천', '뭐 입', '코디', '입을까', '매칭', '골라', '스타일링', '패션', '어울리', '조합']):
+        if any(word in msg for word in ['추천', '추천해', '뭐 입', '코디', '입을까', '매칭', '골라', '스타일링', '패션', '어울리', '조합', '찾아']):
             return "좋아요! 어울리는 옷을 찾아드릴게요! ✨"
         
         # 날씨 - 춥다
@@ -793,8 +874,10 @@ AI: "좋아! 데이트에 시원하면서 멋진 스타일 찾아줄게! 💕"
             SELECT w.item_id, w.user_id,
                    CASE WHEN w.user_id = %s THEN 0 ELSE 1 END as user_priority
             FROM wardrobe_items w
-            LEFT JOIN top_attributes t ON w.item_id = t.item_id
-            LEFT JOIN bottom_attributes b ON w.item_id = b.item_id
+            LEFT JOIN top_attributes_new t ON w.item_id = t.item_id
+            LEFT JOIN bottom_attributes_new b ON w.item_id = b.item_id
+            LEFT JOIN outer_attributes_new o ON w.item_id = o.item_id
+            LEFT JOIN dress_attributes_new d ON w.item_id = d.item_id
             WHERE (w.user_id = %s OR w.is_default = TRUE)
               AND ({where_clause})
             GROUP BY w.item_id, w.user_id
