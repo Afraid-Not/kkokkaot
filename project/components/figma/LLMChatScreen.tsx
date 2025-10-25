@@ -28,20 +28,11 @@ import AppHeader from '../common/AppHeader';
 import BottomNavBar from '../common/BottomNavBar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+import { MainScreen } from '../../App';
+
 const API_BASE_URL = 'https://loyd-extemporaneous-annalise.ngrok-free.dev';
 const APP_HEADER_HEIGHT = 56;
 const BOTTOM_NAV_HEIGHT = 80;
-
-type NavigationStep =
-  | 'home'
-  | 'today-curation'
-  | 'daily-outfit'
-  | 'wardrobe-management'
-  | 'style-analysis'
-  | 'shopping'
-  | 'virtual-fitting'
-  | 'recent-styling'
-  | 'blocked-outfits';
 
 type ChatMessage = {
   role: 'user' | 'assistant';
@@ -70,6 +61,9 @@ type WardrobeItem = {
   has_bottom?: boolean;
   has_outer?: boolean;
   has_dress?: boolean;
+  image_path?: string;
+  is_recommended?: boolean;  // 추천된 아이템
+  is_selected?: boolean;      // 선택된 아이템
 };
 
 export default function LLMChatScreen({
@@ -77,7 +71,7 @@ export default function LLMChatScreen({
   onNavigate,
 }: {
   onBack: () => void;
-  onNavigate: (step: NavigationStep) => void;
+  onNavigate: (step: MainScreen) => void;
 }) {
   const [userId, setUserId] = useState<number | null>(null);
   const [wardrobeItems, setWardrobeItems] = useState<WardrobeItem[]>([]);
@@ -149,13 +143,15 @@ export default function LLMChatScreen({
     }
   }, [userId, fetchWardrobe]);
 
-  // 아이템 선택/해제 토글
+  // 아이템 선택 (단일 선택만 가능)
   const toggleItemSelection = (itemId: number) => {
     setSelectedItemIds(prev => {
+      // 이미 선택된 아이템을 다시 클릭하면 선택 해제
       if (prev.includes(itemId)) {
-        return prev.filter(id => id !== itemId);
+        return [];
       } else {
-        return [...prev, itemId];
+        // 새 아이템 선택 (기존 선택은 자동 해제)
+        return [itemId];
       }
     });
   };
@@ -205,6 +201,9 @@ export default function LLMChatScreen({
 
       if (response.ok) {
         const data = await response.json();
+        console.log('📦 전체 응답 데이터:', data);
+        console.log('🎯 추천 아이템 수:', data.recommendations?.length || 0);
+        console.log('🎯 추천 아이템 샘플:', data.recommendations?.[0]);
         
         const assistantMessage: ChatMessage = {
           role: 'assistant',
@@ -214,13 +213,63 @@ export default function LLMChatScreen({
 
         setChatMessages(prev => [...prev, assistantMessage]);
         
+        // 추천 아이템이 있으면 표시
         if (data.recommendations && data.recommendations.length > 0) {
-          setChatRecommendations(data.recommendations);
-        }
-        
-        // 추천 완료 시 선택 초기화
-        if (data.recommendations && data.recommendations.length > 0) {
+          console.log('✅ 추천 아이템 설정:', data.recommendations.length, '개');
+          
+          // 백엔드 형식을 프론트엔드 형식으로 변환
+          const formattedRecommendations = data.recommendations.map((rec: any) => {
+            // 아이템 이름 생성
+            let itemName = '';
+            const categories = [];
+            if (rec.has_dress) categories.push('원피스');
+            if (rec.has_outer) categories.push('아우터');
+            if (rec.has_top) categories.push('상의');
+            if (rec.has_bottom) categories.push('하의');
+            
+            itemName = categories.length > 0 ? categories.join(' / ') : `아이템 ${rec.item_id || rec.id}`;
+            
+            return {
+              id: rec.item_id || rec.id,
+              name: rec.name || itemName,
+              brand: rec.is_default ? '기본 아이템' : 'My Wardrobe',
+              category: rec.has_top ? 'top' : rec.has_bottom ? 'bottom' : rec.has_outer ? 'outer' : rec.has_dress ? 'dress' : 'other',
+              color: '',
+              fit: '',
+              materials: [],
+              image: rec.image_path || '',
+              image_path: rec.image_path || '',
+              has_top: rec.has_top,
+              has_bottom: rec.has_bottom,
+              has_outer: rec.has_outer,
+              has_dress: rec.has_dress,
+              is_recommended: true,  // 👈 추천 아이템 표시용
+            };
+          });
+          
+          // 선택된 아이템 정보도 함께 표시 (추천 결과 앞에 배치)
+          // 주의: selectedItemIds를 초기화하기 전에 필터링해야 함
+          const currentlySelected = [...selectedItemIds];  // 복사본 생성
+          
+          const selectedItems = chatRecommendations.filter(item => 
+            currentlySelected.includes(item.id)
+          ).map(item => ({
+            ...item,
+            is_selected: true  // 👈 선택된 아이템 표시용
+          }));
+          
+          console.log('🎨 변환된 추천 아이템:', formattedRecommendations);
+          console.log('👕 선택된 아이템:', selectedItems);
+          console.log('🔄 선택 초기화 전 selectedItemIds:', selectedItemIds);
+          
+          // 선택 초기화 (먼저 실행)
           setSelectedItemIds([]);
+          console.log('✅ 선택 초기화 완료');
+          
+          // 선택된 아이템 + 추천 아이템 함께 표시
+          setChatRecommendations([...selectedItems, ...formattedRecommendations]);
+        } else {
+          console.log('⚠️ 추천 아이템이 없음');
         }
       } else {
         throw new Error(`HTTP ${response.status}`);
@@ -427,7 +476,7 @@ export default function LLMChatScreen({
       <AppHeader
         title="AI 스타일리스트"
         onBack={onBack}
-        rightComponent={
+        rightAction={
           <Pressable style={styles.headerBtn}>
             <MessageCircle size={20} color="#111" />
           </Pressable>
@@ -479,11 +528,11 @@ export default function LLMChatScreen({
           )}
         </ScrollView>
 
-        {/* 옷장 아이템 */}
-        {chatRecommendations.length > 0 && (
+        {/* 선택한 옷 섹션 */}
+        {chatRecommendations.some(item => item.is_selected) && (
           <View style={styles.recommendationsContainer}>
             <View style={styles.recommendationsHeader}>
-              <Text style={styles.recommendationsTitle}>내 옷장 👗</Text>
+              <Text style={styles.recommendationsTitle}>📌 선택한 옷</Text>
               <Pressable 
                 style={styles.closeButton}
                 onPress={() => setChatRecommendations([])}
@@ -494,30 +543,132 @@ export default function LLMChatScreen({
             </View>
             <ScrollView horizontal showsHorizontalScrollIndicator={false}>
               <View style={styles.recommendationsList}>
-                {chatRecommendations.map((item) => {
-                  const isSelected = selectedItemIds.includes(item.id);
+                {chatRecommendations
+                  .filter(item => item.is_selected)
+                  .map((item, index) => (
+                    <Pressable 
+                      key={`selected-${item.id}-${index}`} 
+                      style={[styles.recommendationCard, styles.selectedItemCard]}
+                      onPress={() => {}}  // 클릭 불가
+                    >
+                      <Image 
+                        source={{ uri: `${API_BASE_URL}${item.image_path || item.image}` }} 
+                        style={styles.recommendationImage}
+                        onError={(e) => console.error('❌ 이미지 로드 실패:', `${API_BASE_URL}${item.image_path || item.image}`, e.nativeEvent.error)}
+                        onLoad={() => console.log('✅ 이미지 로드 성공:', `${API_BASE_URL}${item.image_path || item.image}`)}
+                      />
+                      <View style={styles.selectedItemBadge}>
+                        <Text style={styles.selectedItemBadgeText}>선택함</Text>
+                      </View>
+                      <Text style={styles.recommendationName} numberOfLines={2}>
+                        {item.name || item.category || '의류'}
+                      </Text>
+                    </Pressable>
+                  ))}
+              </View>
+            </ScrollView>
+          </View>
+        )}
+
+        {/* 추천 코디 섹션 */}
+        {chatRecommendations.some(item => item.is_recommended) && (
+          <View style={styles.recommendationsContainer}>
+            <View style={styles.recommendationsHeader}>
+              <Text style={styles.recommendationsTitle}>✨ 추천 코디</Text>
+              {!chatRecommendations.some(item => item.is_selected) && (
+                <Pressable 
+                  style={styles.closeButton}
+                  onPress={() => setChatRecommendations([])}
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                >
+                  <X size={18} color="#6B7280" />
+                </Pressable>
+              )}
+            </View>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              <View style={styles.recommendationsList}>
+                {chatRecommendations
+                  .filter(item => item.is_recommended)
+                  .map((item, index) => {
+                    // 실시간 선택 상태 (체크 마크용)
+                    const isCurrentlySelected = selectedItemIds.includes(item.id);
+                    
+                    return (
+                      <Pressable 
+                        key={`recommended-${item.id}-${index}`} 
+                        style={[
+                          styles.recommendationCard,
+                          isCurrentlySelected && styles.recommendationCardSelected
+                        ]}
+                        onPress={() => toggleItemSelection(item.id)}
+                      >
+                        <Image 
+                          source={{ uri: `${API_BASE_URL}${item.image_path || item.image}` }} 
+                          style={styles.recommendationImage}
+                          onError={(e) => console.error('❌ 이미지 로드 실패:', `${API_BASE_URL}${item.image_path || item.image}`, e.nativeEvent.error)}
+                          onLoad={() => console.log('✅ 이미지 로드 성공:', `${API_BASE_URL}${item.image_path || item.image}`)}
+                        />
+                        <View style={styles.recommendedBadge}>
+                          <Text style={styles.recommendedBadgeText}>추천</Text>
+                        </View>
+                        {/* 현재 선택 중인 아이템 체크 마크 (실시간) */}
+                        {isCurrentlySelected && (
+                          <View style={styles.selectedBadge}>
+                            <Check size={16} color="#FFF" />
+                          </View>
+                        )}
+                        <Text style={styles.recommendationName} numberOfLines={2}>
+                          {item.name || item.category || '의류'}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+              </View>
+            </ScrollView>
+          </View>
+        )}
+
+        {/* 옷장 전체 보기 (선택도 추천도 아닌 경우) */}
+        {chatRecommendations.length > 0 && 
+         !chatRecommendations.some(item => item.is_selected || item.is_recommended) && (
+          <View style={styles.recommendationsContainer}>
+            <View style={styles.recommendationsHeader}>
+              <Text style={styles.recommendationsTitle}>👗 내 옷장</Text>
+              <Pressable 
+                style={styles.closeButton}
+                onPress={() => setChatRecommendations([])}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <X size={18} color="#6B7280" />
+              </Pressable>
+            </View>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              <View style={styles.recommendationsList}>
+                {chatRecommendations.map((item, index) => {
+                  const isCurrentlySelected = selectedItemIds.includes(item.id);
+                  
                   return (
                     <Pressable 
-                      key={item.id} 
+                      key={`wardrobe-${item.id}-${index}`} 
                       style={[
                         styles.recommendationCard,
-                        isSelected && styles.recommendationCardSelected
+                        isCurrentlySelected && styles.recommendationCardSelected
                       ]}
                       onPress={() => toggleItemSelection(item.id)}
                     >
                       <Image 
-                        source={{ uri: `${API_BASE_URL}${item.image}` }} 
+                        source={{ uri: `${API_BASE_URL}${item.image_path || item.image}` }} 
                         style={styles.recommendationImage}
-                        onError={(e) => console.error('❌ LLM 이미지 로드 실패:', `${API_BASE_URL}${item.image}`, e.nativeEvent.error)}
-                        onLoad={() => console.log('✅ LLM 이미지 로드 성공:', `${API_BASE_URL}${item.image}`)}
+                        onError={(e) => console.error('❌ 이미지 로드 실패:', `${API_BASE_URL}${item.image_path || item.image}`, e.nativeEvent.error)}
+                        onLoad={() => console.log('✅ 이미지 로드 성공:', `${API_BASE_URL}${item.image_path || item.image}`)}
                       />
-                      {isSelected && (
+                      {isCurrentlySelected && (
                         <View style={styles.selectedBadge}>
                           <Check size={16} color="#FFF" />
                         </View>
                       )}
                       <Text style={styles.recommendationName} numberOfLines={2}>
-                        {item.name}
+                        {item.name || item.category || '의류'}
                       </Text>
                     </Pressable>
                   );
@@ -636,7 +787,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFF',
     borderRadius: 12,
     padding: 16,
-    marginBottom: 12,
+    marginBottom: 16,  // 섹션 간 간격 증가
     borderWidth: 1,
     borderColor: '#E5E7EB',
   },
@@ -671,6 +822,12 @@ const styles = StyleSheet.create({
   recommendationCardSelected: {
     transform: [{ scale: 0.95 }],
   },
+  selectedItemCard: {
+    borderWidth: 2,
+    borderColor: '#3B82F6',
+    borderRadius: 8,
+    padding: 2,
+  },
   recommendationImage: {
     width: 80,
     height: 100,
@@ -691,6 +848,34 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: 2,
     borderColor: '#FFF',
+  },
+  selectedItemBadge: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    backgroundColor: '#3B82F6',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 8,
+  },
+  selectedItemBadgeText: {
+    color: '#FFF',
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  recommendedBadge: {
+    position: 'absolute',
+    top: 4,
+    left: 4,
+    backgroundColor: '#10B981',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 8,
+  },
+  recommendedBadgeText: {
+    color: '#FFF',
+    fontSize: 10,
+    fontWeight: '600',
   },
   recommendationName: {
     fontSize: 12,

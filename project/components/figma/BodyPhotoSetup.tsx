@@ -9,7 +9,7 @@ import {
   ActivityIndicator,
   ScrollView,
   Alert as RNAlert,
-  Platform, // Platform import 추가
+  Platform, // Platform import 추가 
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';

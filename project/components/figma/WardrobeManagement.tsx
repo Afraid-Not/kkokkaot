@@ -319,11 +319,12 @@ export default function WardrobeManagement({
       item.name,
       '원하는 작업을 선택해주세요.',
       [
-        { text: '정보 보기', onPress: () => showItemDetail(item.id) },  // 👈 수정!
+        { text: '정보 보기', onPress: () => showItemDetail(item.id) },
         { text: '편집', onPress: () => Alert.alert('알림', '편집 기능은 곧 추가될 예정입니다.') },
         { text: '삭제', style: 'destructive', onPress: () => deleteItem(item.id, item.name) },
-        { text: '취소', style: 'cancel' },
-      ]
+        { text: '취소', style: 'cancel' },  // 👈 맨 뒤로 이동 (Android 순서: 정보보기→편집→삭제→취소)
+      ],
+      { cancelable: true }  // Android에서 바깥 영역 터치로도 닫기 가능
     );
   };
   
@@ -385,44 +386,44 @@ export default function WardrobeManagement({
         // 아우터 분석 결과 (우선순위 1)
         if (data.outer_attributes) {
           message += `🧥 아우터\n`;
-          message += `  - 카테고리: ${data.outer_attributes.category}\n`;
-          message += `  - 컬러: ${data.outer_attributes.color}\n`;
-          message += `  - 핏: ${data.outer_attributes.fit}\n`;
-          message += `  - 스타일: ${data.outer_attributes.style || 'N/A'}\n`;
-          message += `  - 소재: ${data.outer_attributes.material || 'N/A'}\n`;
-          message += `  - 소매: ${data.outer_attributes.sleeve || 'N/A'}\n\n`;
+          message += `  - 카테고리: ${data.outer_attributes.category?.value || 'N/A'}\n`;
+          message += `  - 컬러: ${data.outer_attributes.color?.value || 'N/A'}\n`;
+          message += `  - 핏: ${data.outer_attributes.fit?.value || 'N/A'}\n`;
+          message += `  - 스타일: ${data.outer_attributes.style?.value || 'N/A'}\n`;
+          message += `  - 소재: ${data.outer_attributes.material?.value || 'N/A'}\n`;
+          message += `  - 소매: ${data.outer_attributes.sleeve?.value || 'N/A'}\n\n`;
         }
         
         // 상의 분석 결과 (우선순위 2)
         if (data.top_attributes) {
           message += `👕 상의\n`;
-          message += `  - 카테고리: ${data.top_attributes.category}\n`;
-          message += `  - 컬러: ${data.top_attributes.color}\n`;
-          message += `  - 핏: ${data.top_attributes.fit}\n`;
-          message += `  - 스타일: ${data.top_attributes.style || 'N/A'}\n`;
-          message += `  - 소재: ${data.top_attributes.material || 'N/A'}\n`;
-          message += `  - 소매: ${data.top_attributes.sleeve || 'N/A'}\n\n`;
+          message += `  - 카테고리: ${data.top_attributes.category?.value || 'N/A'}\n`;
+          message += `  - 컬러: ${data.top_attributes.color?.value || 'N/A'}\n`;
+          message += `  - 핏: ${data.top_attributes.fit?.value || 'N/A'}\n`;
+          message += `  - 스타일: ${data.top_attributes.style?.value || 'N/A'}\n`;
+          message += `  - 소재: ${data.top_attributes.material?.value || 'N/A'}\n`;
+          message += `  - 소매: ${data.top_attributes.sleeve?.value || 'N/A'}\n\n`;
         }
         
         // 하의 분석 결과 (우선순위 3)
         if (data.bottom_attributes) {
           message += `👖 하의\n`;
-          message += `  - 카테고리: ${data.bottom_attributes.category}\n`;
-          message += `  - 컬러: ${data.bottom_attributes.color}\n`;
-          message += `  - 핏: ${data.bottom_attributes.fit}\n`;
-          message += `  - 스타일: ${data.bottom_attributes.style || 'N/A'}\n`;
-          message += `  - 소재: ${data.bottom_attributes.material || 'N/A'}\n`;
-          message += `  - 길이: ${data.bottom_attributes.length || 'N/A'}\n\n`;
+          message += `  - 카테고리: ${data.bottom_attributes.category?.value || 'N/A'}\n`;
+          message += `  - 컬러: ${data.bottom_attributes.color?.value || 'N/A'}\n`;
+          message += `  - 핏: ${data.bottom_attributes.fit?.value || 'N/A'}\n`;
+          message += `  - 스타일: ${data.bottom_attributes.style?.value || 'N/A'}\n`;
+          message += `  - 소재: ${data.bottom_attributes.material?.value || 'N/A'}\n`;
+          message += `  - 길이: ${data.bottom_attributes.length?.value || 'N/A'}\n\n`;
         }
         
         // 드레스 분석 결과 (우선순위 4)
         if (data.dress_attributes) {
           message += `👗 드레스\n`;
-          message += `  - 카테고리: ${data.dress_attributes.category}\n`;
-          message += `  - 컬러: ${data.dress_attributes.color}\n`;
-          message += `  - 스타일: ${data.dress_attributes.style || 'N/A'}\n`;
-          message += `  - 소재: ${data.dress_attributes.material || 'N/A'}\n`;
-          message += `  - 프린트: ${data.dress_attributes.print || 'N/A'}\n\n`;
+          message += `  - 카테고리: ${data.dress_attributes.category?.value || 'N/A'}\n`;
+          message += `  - 컬러: ${data.dress_attributes.color?.value || 'N/A'}\n`;
+          message += `  - 스타일: ${data.dress_attributes.style?.value || 'N/A'}\n`;
+          message += `  - 소재: ${data.dress_attributes.material?.value || 'N/A'}\n`;
+          message += `  - 프린트: ${data.dress_attributes.print?.value || 'N/A'}\n\n`;
         }
         
         // 아이템 ID 정보
@@ -628,205 +629,166 @@ export default function WardrobeManagement({
               </Pressable>
             </View>
 
-            {/* ✅ 전체 이미지 섹션 추가 */}
-            {item.full_image_path && (
-              <View style={styles.modalSection}>
-                <Text style={styles.modalSectionTitle}>📸 전체 이미지</Text>
-                <Image 
-                  source={{ uri: `${API_BASE_URL}${item.full_image_path}` }} 
-                  style={styles.modalOriginalImage}
-                  resizeMode="contain"
-                />
-              </View>
-            )}
+            {/* 이미지는 표시하지 않음 - AI 예측 결과만 표시 */}
 
 
 
 
             {/* 상의 정보 */}
-            {/* 상의 정보 - 아우터 표시 추가 */}
-            {item.has_top && item.top_attributes && (
+            {item.has_top && item.attributes?.top && (
               <View style={styles.modalSection}>
-                <Text style={styles.modalSectionTitle}>
-                  {item.is_outer ? '🧥 아우터' : '👕 상의'}
-                </Text>
-                
-                <Image 
-                  source={{ uri: `${API_BASE_URL}${item.top_image_path || `/api/processed-images/user_3/top/item_${item.item_id}_top.jpg`}` }} 
-                  style={styles.modalSeparatedImage}
-                  resizeMode="contain"
-                />
+                <Text style={styles.modalSectionTitle}>👕 상의</Text>
                 
                 <View style={styles.modalInfoBox}>
                   <View style={styles.modalInfoRow}>
                     <Text style={styles.modalLabel}>카테고리</Text>
-                    <Text style={styles.modalValue}>
-                      {item.top_attributes.category} ({(item.top_attributes.category_confidence * 100).toFixed(0)}%)
-                    </Text>
+                    <Text style={styles.modalValue}>{item.attributes.top.category || 'N/A'}</Text>
                   </View>
                   <View style={styles.modalInfoRow}>
                     <Text style={styles.modalLabel}>색상</Text>
-                    <Text style={styles.modalValue}>
-                      {item.top_attributes.color} ({(item.top_attributes.color_confidence * 100).toFixed(0)}%)
-                    </Text>
+                    <Text style={styles.modalValue}>{item.attributes.top.color || 'N/A'}</Text>
                   </View>
                   <View style={styles.modalInfoRow}>
                     <Text style={styles.modalLabel}>핏</Text>
-                    <Text style={styles.modalValue}>
-                      {item.top_attributes.fit} ({(item.top_attributes.fit_confidence * 100).toFixed(0)}%)
-                    </Text>
+                    <Text style={styles.modalValue}>{item.attributes.top.fit || 'N/A'}</Text>
                   </View>
                   <View style={styles.modalInfoRow}>
                     <Text style={styles.modalLabel}>소재</Text>
-                    <Text style={styles.modalValue}>
-                      {Array.isArray(item.top_attributes.materials) 
-                        ? item.top_attributes.materials.join(', ') 
-                        : item.top_attributes.materials}
-                    </Text>
+                    <Text style={styles.modalValue}>{item.attributes.top.material || 'N/A'}</Text>
+                  </View>
+                  <View style={styles.modalInfoRow}>
+                    <Text style={styles.modalLabel}>프린트</Text>
+                    <Text style={styles.modalValue}>{item.attributes.top.print_pattern || 'N/A'}</Text>
+                  </View>
+                  <View style={styles.modalInfoRow}>
+                    <Text style={styles.modalLabel}>스타일</Text>
+                    <Text style={styles.modalValue}>{item.attributes.top.style || 'N/A'}</Text>
+                  </View>
+                  <View style={styles.modalInfoRow}>
+                    <Text style={styles.modalLabel}>소매 길이</Text>
+                    <Text style={styles.modalValue}>{item.attributes.top.sleeve_length || 'N/A'}</Text>
+                  </View>
+                  <View style={styles.modalInfoRow}>
+                    <Text style={styles.modalLabel}>성별</Text>
+                    <Text style={styles.modalValue}>{item.attributes.top.gender || 'N/A'}</Text>
                   </View>
                 </View>
               </View>
             )}
 
             {/* 하의 정보 */}
-            {item.has_bottom && item.bottom_attributes && (
+            {item.has_bottom && item.attributes?.bottom && (
               <View style={styles.modalSection}>
                 <Text style={styles.modalSectionTitle}>👖 하의</Text>
                 
-                {/* 하의 이미지 */}
-                <Image 
-                  source={{ uri: `${API_BASE_URL}${item.bottom_image_path || `/api/processed-images/user_3/bottom/item_${item.item_id}_bottom.jpg`}` }} 
-                  style={styles.modalSeparatedImage}
-                  resizeMode="contain"
-                />
-                
                 <View style={styles.modalInfoBox}>
                   <View style={styles.modalInfoRow}>
                     <Text style={styles.modalLabel}>카테고리</Text>
-                    <Text style={styles.modalValue}>
-                      {item.bottom_attributes.category} ({(item.bottom_attributes.category_confidence * 100).toFixed(0)}%)
-                    </Text>
+                    <Text style={styles.modalValue}>{item.attributes.bottom.category || 'N/A'}</Text>
                   </View>
                   <View style={styles.modalInfoRow}>
                     <Text style={styles.modalLabel}>색상</Text>
-                    <Text style={styles.modalValue}>
-                      {item.bottom_attributes.color} ({(item.bottom_attributes.color_confidence * 100).toFixed(0)}%)
-                    </Text>
+                    <Text style={styles.modalValue}>{item.attributes.bottom.color || 'N/A'}</Text>
                   </View>
                   <View style={styles.modalInfoRow}>
                     <Text style={styles.modalLabel}>핏</Text>
-                    <Text style={styles.modalValue}>
-                      {item.bottom_attributes.fit} ({(item.bottom_attributes.fit_confidence * 100).toFixed(0)}%)
-                    </Text>
+                    <Text style={styles.modalValue}>{item.attributes.bottom.fit || 'N/A'}</Text>
                   </View>
                   <View style={styles.modalInfoRow}>
                     <Text style={styles.modalLabel}>소재</Text>
-                    <Text style={styles.modalValue}>
-                      {Array.isArray(item.bottom_attributes.materials) 
-                        ? item.bottom_attributes.materials.join(', ') 
-                        : item.bottom_attributes.materials}
-                    </Text>
-                  </View>
-                </View>
-              </View>
-            )}
-
-            {/* 아우터 정보 - 상세 속성 추가 */}
-            {item.has_outer && item.outer_attributes && (
-              <View style={styles.modalSection}>
-                <Text style={styles.modalSectionTitle}>🧥 아우터</Text>
-                
-                <Image 
-                  source={{ uri: `${API_BASE_URL}${item.outer_image_path || `/api/processed-images/user_3/outer/item_${item.item_id}_outer.jpg`}` }} 
-                  style={styles.modalSeparatedImage}
-                  resizeMode="contain"
-                />
-                
-                <View style={styles.modalInfoBox}>
-                  <View style={styles.modalInfoRow}>
-                    <Text style={styles.modalLabel}>카테고리</Text>
-                    <Text style={styles.modalValue}>
-                      {item.outer_attributes.category} ({(item.outer_attributes.category_confidence * 100).toFixed(0)}%)
-                    </Text>
+                    <Text style={styles.modalValue}>{item.attributes.bottom.material || 'N/A'}</Text>
                   </View>
                   <View style={styles.modalInfoRow}>
-                    <Text style={styles.modalLabel}>색상</Text>
-                    <Text style={styles.modalValue}>
-                      {item.outer_attributes.color} ({(item.outer_attributes.color_confidence * 100).toFixed(0)}%)
-                    </Text>
-                  </View>
-                  <View style={styles.modalInfoRow}>
-                    <Text style={styles.modalLabel}>핏</Text>
-                    <Text style={styles.modalValue}>
-                      {item.outer_attributes.fit} ({(item.outer_attributes.fit_confidence * 100).toFixed(0)}%)
-                    </Text>
-                  </View>
-                  <View style={styles.modalInfoRow}>
-                    <Text style={styles.modalLabel}>소재</Text>
-                    <Text style={styles.modalValue}>
-                      {Array.isArray(item.outer_attributes.materials) 
-                        ? item.outer_attributes.materials.join(', ') 
-                        : item.outer_attributes.materials}
-                    </Text>
+                    <Text style={styles.modalLabel}>프린트</Text>
+                    <Text style={styles.modalValue}>{item.attributes.bottom.print_pattern || 'N/A'}</Text>
                   </View>
                   <View style={styles.modalInfoRow}>
                     <Text style={styles.modalLabel}>스타일</Text>
-                    <Text style={styles.modalValue}>
-                      {item.outer_attributes.style || 'N/A'}
-                    </Text>
+                    <Text style={styles.modalValue}>{item.attributes.bottom.style || 'N/A'}</Text>
                   </View>
                   <View style={styles.modalInfoRow}>
-                    <Text style={styles.modalLabel}>소매</Text>
-                    <Text style={styles.modalValue}>
-                      {item.outer_attributes.sleeve || 'N/A'}
-                    </Text>
+                    <Text style={styles.modalLabel}>길이</Text>
+                    <Text style={styles.modalValue}>{item.attributes.bottom.length || 'N/A'}</Text>
+                  </View>
+                  <View style={styles.modalInfoRow}>
+                    <Text style={styles.modalLabel}>성별</Text>
+                    <Text style={styles.modalValue}>{item.attributes.bottom.gender || 'N/A'}</Text>
                   </View>
                 </View>
               </View>
             )}
 
-            {/* 드레스 정보 */}
-            {item.has_dress && (
+            {/* 아우터 정보 */}
+            {item.has_outer && item.attributes?.outer && (
               <View style={styles.modalSection}>
-                <Text style={styles.modalSectionTitle}>👗 드레스</Text>
-                
-                <Image 
-                  source={{ uri: `${API_BASE_URL}${item.dress_image_path || `/api/processed-images/user_3/dress/item_${item.item_id}_dress.jpg`}` }} 
-                  style={styles.modalSeparatedImage}
-                  resizeMode="contain"
-                />
+                <Text style={styles.modalSectionTitle}>🧥 아우터</Text>
                 
                 <View style={styles.modalInfoBox}>
                   <View style={styles.modalInfoRow}>
                     <Text style={styles.modalLabel}>카테고리</Text>
-                    <Text style={styles.modalValue}>
-                      {item.dress_attributes?.category || 'N/A'} 
-                      {item.dress_attributes?.category_confidence ? ` (${Math.round(item.dress_attributes.category_confidence * 100)}%)` : ''}
-                    </Text>
+                    <Text style={styles.modalValue}>{item.attributes.outer.category || 'N/A'}</Text>
                   </View>
                   <View style={styles.modalInfoRow}>
                     <Text style={styles.modalLabel}>색상</Text>
-                    <Text style={styles.modalValue}>
-                      {item.dress_attributes?.color || 'N/A'} 
-                      {item.dress_attributes?.color_confidence ? ` (${Math.round(item.dress_attributes.color_confidence * 100)}%)` : ''}
-                    </Text>
+                    <Text style={styles.modalValue}>{item.attributes.outer.color || 'N/A'}</Text>
                   </View>
                   <View style={styles.modalInfoRow}>
                     <Text style={styles.modalLabel}>핏</Text>
-                    <Text style={styles.modalValue}>
-                      {item.dress_attributes?.fit || 'N/A'} 
-                      {item.dress_attributes?.fit_confidence ? ` (${Math.round(item.dress_attributes.fit_confidence * 100)}%)` : ''}
-                    </Text>
+                    <Text style={styles.modalValue}>{item.attributes.outer.fit || 'N/A'}</Text>
                   </View>
                   <View style={styles.modalInfoRow}>
                     <Text style={styles.modalLabel}>소재</Text>
-                    <Text style={styles.modalValue}>
-                      {item.dress_attributes?.materials 
-                        ? (Array.isArray(item.dress_attributes.materials) 
-                            ? item.dress_attributes.materials.join(', ') 
-                            : item.dress_attributes.materials)
-                        : 'N/A'}
-                    </Text>
+                    <Text style={styles.modalValue}>{item.attributes.outer.material || 'N/A'}</Text>
+                  </View>
+                  <View style={styles.modalInfoRow}>
+                    <Text style={styles.modalLabel}>프린트</Text>
+                    <Text style={styles.modalValue}>{item.attributes.outer.print_pattern || 'N/A'}</Text>
+                  </View>
+                  <View style={styles.modalInfoRow}>
+                    <Text style={styles.modalLabel}>스타일</Text>
+                    <Text style={styles.modalValue}>{item.attributes.outer.style || 'N/A'}</Text>
+                  </View>
+                  <View style={styles.modalInfoRow}>
+                    <Text style={styles.modalLabel}>소매 길이</Text>
+                    <Text style={styles.modalValue}>{item.attributes.outer.sleeve_length || 'N/A'}</Text>
+                  </View>
+                  <View style={styles.modalInfoRow}>
+                    <Text style={styles.modalLabel}>성별</Text>
+                    <Text style={styles.modalValue}>{item.attributes.outer.gender || 'N/A'}</Text>
+                  </View>
+                </View>
+              </View>
+            )}
+
+            {/* 원피스 정보 */}
+            {item.has_dress && item.attributes?.dress && (
+              <View style={styles.modalSection}>
+                <Text style={styles.modalSectionTitle}>👗 원피스</Text>
+                
+                <View style={styles.modalInfoBox}>
+                  <View style={styles.modalInfoRow}>
+                    <Text style={styles.modalLabel}>카테고리</Text>
+                    <Text style={styles.modalValue}>{item.attributes.dress.category || 'N/A'}</Text>
+                  </View>
+                  <View style={styles.modalInfoRow}>
+                    <Text style={styles.modalLabel}>색상</Text>
+                    <Text style={styles.modalValue}>{item.attributes.dress.color || 'N/A'}</Text>
+                  </View>
+                  <View style={styles.modalInfoRow}>
+                    <Text style={styles.modalLabel}>소재</Text>
+                    <Text style={styles.modalValue}>{item.attributes.dress.material || 'N/A'}</Text>
+                  </View>
+                  <View style={styles.modalInfoRow}>
+                    <Text style={styles.modalLabel}>프린트</Text>
+                    <Text style={styles.modalValue}>{item.attributes.dress.print_pattern || 'N/A'}</Text>
+                  </View>
+                  <View style={styles.modalInfoRow}>
+                    <Text style={styles.modalLabel}>스타일</Text>
+                    <Text style={styles.modalValue}>{item.attributes.dress.style || 'N/A'}</Text>
+                  </View>
+                  <View style={styles.modalInfoRow}>
+                    <Text style={styles.modalLabel}>성별</Text>
+                    <Text style={styles.modalValue}>{item.attributes.dress.gender || 'N/A'}</Text>
                   </View>
                 </View>
               </View>
@@ -861,21 +823,6 @@ export default function WardrobeManagement({
 
         {/* 카테고리 필터 */}
         <View style={styles.categoryFilter}>
-          <Pressable 
-            style={[
-              styles.categoryBtn, 
-              selectedCategory === 'all' && styles.categoryBtnActive
-            ]}
-            onPress={() => setSelectedCategory('all')}
-          >
-            <Text style={[
-              styles.categoryBtnText,
-              selectedCategory === 'all' && styles.categoryBtnTextActive
-            ]}>
-              전체 ({items.length})
-            </Text>
-          </Pressable>
-
           <Pressable 
             style={[
               styles.categoryBtn, 
@@ -932,7 +879,22 @@ export default function WardrobeManagement({
               styles.categoryBtnText,
               selectedCategory === 'dress' && styles.categoryBtnTextActive
             ]}>
-              👗 드레스 ({items.filter(i => i.has_dress === true).length})
+              👗 원피스 ({items.filter(i => i.has_dress === true).length})
+            </Text>
+          </Pressable>
+
+          <Pressable 
+            style={[
+              styles.categoryBtn, 
+              selectedCategory === 'all' && styles.categoryBtnActive
+            ]}
+            onPress={() => setSelectedCategory('all')}
+          >
+            <Text style={[
+              styles.categoryBtnText,
+              selectedCategory === 'all' && styles.categoryBtnTextActive
+            ]}>
+              전체 ({items.length})
             </Text>
           </Pressable>
         </View>

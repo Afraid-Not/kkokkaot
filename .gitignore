@@ -37,6 +37,7 @@ uploaded_images/
 processed_images/
 processed_default_images/
 API/default_items/
+API/man_woman/
 temp/
 cache/
 converted_data/all_images/

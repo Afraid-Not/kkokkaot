@@ -11,7 +11,7 @@ import {
     View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import AppHeader from '../common/AppHeader';
+import AppHeader from '../common/AppHeader'; 
 import BottomNavBar from '../common/BottomNavBar';
 
 type NavigationStep =

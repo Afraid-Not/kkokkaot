@@ -27,7 +27,7 @@ export default function WardrobeSetup({
     if (status !== 'granted') {
       RNAlert.alert('권한 필요', '카메라 권한을 허용해줘.');
       return false;
-    }
+    } 
     return true;
   }
 

@@ -411,16 +411,25 @@ export default function DailyOutfitRecommendation({
         }
         
         const recs = data.map((rec: any) => {
-          // 이미지 URL 생성 (기본 아이템과 사용자 아이템 구분)
+          // 이미지 URL 생성
           let imageUrl = '';
-          if (rec.is_default) {
-            imageUrl = `${API_BASE_URL}/api/default-images/${rec.image_path}`;
-          } else {
-            // image_path가 item_xxx_full.jpg 형태인지 확인
-            if (rec.image_path && rec.image_path.startsWith('item_') && rec.image_path.includes('_full.jpg')) {
-              imageUrl = `${API_BASE_URL}/api/processed-images/user_${userId}/full/${rec.image_path}`;
+          if (rec.image_path) {
+            // 백엔드에서 이미 /api/로 시작하는 경로를 반환하므로 그대로 사용
+            if (rec.image_path.startsWith('/api/')) {
+              imageUrl = `${API_BASE_URL}${rec.image_path}`;
             } else {
-              // 원본 파일명인 경우 item_xxx_full.jpg 형태로 변환
+              // 폴백: 파일명만 있는 경우
+              if (rec.is_default) {
+                imageUrl = `${API_BASE_URL}/api/processed-images/user_0/full/${rec.image_path}`;
+              } else {
+                imageUrl = `${API_BASE_URL}/api/processed-images/user_${userId}/full/${rec.image_path}`;
+              }
+            }
+          } else {
+            // image_path가 없는 경우 기본 경로
+            if (rec.is_default) {
+              imageUrl = `${API_BASE_URL}/api/processed-images/user_0/full/item_${rec.id}_full.jpg`;
+            } else {
               imageUrl = `${API_BASE_URL}/api/processed-images/user_${userId}/full/item_${rec.id}_full.jpg`;
             }
           }
@@ -599,7 +608,7 @@ export default function DailyOutfitRecommendation({
     }
   };
 
-  if (loading) {
+  if (loading) { 
     return (
       <SafeAreaView style={styles.safe}>
         <AppHeader title="AI 코디 분석" onBack={onBack} />
@@ -738,7 +747,7 @@ export default function DailyOutfitRecommendation({
                       console.log('❌ 상의 이미지 로드 실패:', baseItem.top_image || baseItem.image);
                     }}
                     onLoad={() => {
-                      console.log('✅ 상의 이미지 로드 성공:', baseItem.top_image || baseItem.image);
+                      console.log('✅ 상의 이미지 로드 성공 (crop 우선):', baseItem.top_image || baseItem.image);
                     }}
                   />
                 </Pressable>
@@ -762,7 +771,7 @@ export default function DailyOutfitRecommendation({
                       console.log('❌ 하의 이미지 로드 실패:', baseItem.bottom_image || baseItem.image);
                     }}
                     onLoad={() => {
-                      console.log('✅ 하의 이미지 로드 성공:', baseItem.bottom_image || baseItem.image);
+                      console.log('✅ 하의 이미지 로드 성공 (crop 우선):', baseItem.bottom_image || baseItem.image);
                     }}
                   />
                 </Pressable>
@@ -779,7 +788,16 @@ export default function DailyOutfitRecommendation({
                   <Text style={[styles.partText, selectedPart === 'outer' && styles.partTextActive]}>
                     🧥 아우터
                   </Text>
-                  <Image source={{ uri: baseItem.outer_image || baseItem.image }} style={styles.partImage} />
+                  <Image 
+                    source={{ uri: baseItem.outer_image || baseItem.image }} 
+                    style={styles.partImage}
+                    onError={(error) => {
+                      console.log('❌ 아우터 이미지 로드 실패:', baseItem.outer_image || baseItem.image);
+                    }}
+                    onLoad={() => {
+                      console.log('✅ 아우터 이미지 로드 성공 (crop 우선):', baseItem.outer_image || baseItem.image);
+                    }}
+                  />
                 </Pressable>
               )}
               
@@ -801,7 +819,7 @@ export default function DailyOutfitRecommendation({
                       console.log('❌ 드레스 이미지 로드 실패:', baseItem.dress_image || baseItem.image);
                     }}
                     onLoad={() => {
-                      console.log('✅ 드레스 이미지 로드 성공:', baseItem.dress_image || baseItem.image);
+                      console.log('✅ 드레스 이미지 로드 성공 (crop 우선):', baseItem.dress_image || baseItem.image);
                     }}
                   />
                 </Pressable>
