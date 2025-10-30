@@ -47,8 +47,11 @@ const STYLE_PREFERENCES = [
   { name: '히피', image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/hippy.jpg' },
   { name: '힙합', image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/hiphop.jpg' },
 ];
-// const API_URL = 'http://10.0.2.2:4000/api/signup';
-const API_URL = 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/signup';
+// API URL 설정 (환경에 따라 변경)
+const API_URL = process.env.REACT_APP_API_URL 
+  ? `${process.env.REACT_APP_API_URL}/api/signup`
+  : 'http://192.168.56.1:4000/api/signup';  // 기본값 (로컬 개발)
+
 export default function SignupScreen({ onSignupSuccess, onBackToLogin }: SignupScreenProps) {
   const [step, setStep] = useState(1);
   const totalSteps = 3;
@@ -90,18 +93,17 @@ export default function SignupScreen({ onSignupSuccess, onBackToLogin }: SignupS
         stylePreferences: form.stylePreferences,
       });
 
+      // FormData로 전송 (백엔드와 일치)
+      const formData = new FormData();
+      formData.append('name', form.name);
+      formData.append('email', form.email);
+      formData.append('password', form.pw);
+      formData.append('ageGroup', form.ageGroup?.toString() || '20');
+      formData.append('stylePreferences', JSON.stringify(form.stylePreferences));
+
       const response = await fetch(API_URL, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          name: form.name,
-          email: form.email,
-          password: form.pw,
-          ageGroup: form.ageGroup,
-          stylePreferences: form.stylePreferences,
-        }),
+        body: formData,  // FormData 전송 (Content-Type 자동 설정)
       });
 
       console.log('📥 응답 상태:', response.status, response.statusText);
