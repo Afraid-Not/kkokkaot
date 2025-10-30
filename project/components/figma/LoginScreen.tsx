@@ -22,7 +22,7 @@ export type LoginScreenProps = {
 const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
 const PASSWORD_REGEX = /^(?=.*[a-zA-Z])(?=.*[0-9])(?=.*[!@#$%^&*()_+])[a-zA-Z0-9!@#$%^&*()_+]{8,20}$/;
 
-const API_BASE_URL = 'https://loyd-extemporaneous-annalise.ngrok-free.dev';
+const API_BASE_URL = 'http://15.165.88.97:4000';
 // const API_BASE_URL = 'http://10.0.2.2:4000';
 
 export default function LoginScreen({

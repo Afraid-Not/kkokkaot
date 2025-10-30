@@ -2,12 +2,19 @@
 인증 관련 API (회원가입, 로그인)
 """
 from fastapi import APIRouter, Form, HTTPException, Depends
+from pydantic import BaseModel
 import bcrypt
 import psycopg2
 import json
 from models.schemas import SignupRequest, UserResponse
 
 router = APIRouter(prefix="/api", tags=["인증"])
+
+
+class LoginRequest(BaseModel):
+    """로그인 요청 모델"""
+    email: str
+    password: str
 
 # 전역 변수 (메인에서 주입)
 pipeline = None
@@ -111,12 +118,15 @@ def signup(request: SignupRequest):
 
 
 @router.post("/login")
-def login(email: str = Form(...), password: str = Form(...)):
+def login(request: LoginRequest):
     """
     로그인 API
     - 이메일로 사용자 조회
     - 비밀번호 검증
     """
+    email = request.email
+    password = request.password
+    
     print(f"\n{'='*60}")
     print(f"🔑 로그인 요청: {email}")
     print(f"{'='*60}")
@@ -128,7 +138,7 @@ def login(email: str = Form(...), password: str = Form(...)):
         }
     
     try:
-        with pipeline.db.conn.cursor() as cur:
+        with pipeline.db_conn.cursor() as cur:
             cur.execute("""
                 SELECT user_id, username, email, password_hash 
                 FROM users 
