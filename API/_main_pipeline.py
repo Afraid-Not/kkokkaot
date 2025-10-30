@@ -122,6 +122,23 @@ class FashionPipeline:
         self.db_config = db_config
         self.db_conn = psycopg2.connect(**db_config)
         
+        # 읽기 전용 계정 설정
+        db_config_readonly = {
+            'host': 'localhost',
+            'port': 5432,
+            'database': 'kkokkaot_closet',
+            'user': 'readonly_user',
+            'password': '000000'  # postgres와 동일한 패스워드로 변경
+        }
+        
+        # 읽기 전용 연결
+        try:
+            self.db_conn_readonly = psycopg2.connect(**db_config_readonly)
+            print("✅ 읽기 전용 DB 연결 완료")
+        except Exception as e:
+            print(f"⚠️ 읽기 전용 DB 연결 실패: {e}")
+            self.db_conn_readonly = None
+        
         print("\n✓ 모든 모델 로드 완료\n")
     
     def load_style_model(self, model_path: str):
@@ -1368,6 +1385,10 @@ class FashionPipeline:
         if self.db_conn:
             self.db_conn.close()
             print("PostgreSQL 연결 종료")
+        
+        if hasattr(self, 'db_conn_readonly') and self.db_conn_readonly:
+            self.db_conn_readonly.close()
+            print("읽기 전용 PostgreSQL 연결 종료")
 
 
 # MultiTaskFashionModel 정의
