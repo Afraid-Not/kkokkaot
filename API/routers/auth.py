@@ -118,14 +118,12 @@ def signup(request: SignupRequest):
 
 
 @router.post("/login")
-def login(request: LoginRequest):
+def login(email: str = Form(...), password: str = Form(...)):
     """
     로그인 API
     - 이메일로 사용자 조회
     - 비밀번호 검증
     """
-    email = request.email
-    password = request.password
     
     print(f"\n{'='*60}")
     print(f"🔑 로그인 요청: {email}")
@@ -138,7 +136,7 @@ def login(request: LoginRequest):
         }
     
     try:
-        with pipeline.db_conn.cursor() as cur:
+        with pipeline.db.conn.cursor() as cur:
             cur.execute("""
                 SELECT user_id, username, email, password_hash 
                 FROM users 
