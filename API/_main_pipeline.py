@@ -31,16 +31,16 @@ class FashionPipeline:
     """가상옷장 전체 파이프라인 (업데이트된 버전)"""
     
     def __init__(self, 
-                style_model_path: str = "D:/kkokkaot/API/pre_trained_weights/k_fashion_best_model.pth",
-                yolo_detection_path: str = "D:/kkokkaot/API/pre_trained_weights/yolo_best.pt",
+                style_model_path: str = "/app/pre_trained_weights/k_fashion_best_model.pth",
+                yolo_detection_path: str = "/app/pre_trained_weights/yolo_best.pt",
                 # 새로운 의류별 모델 경로
-                top_model_path: str = "D:/kkokkaot/models/top/best_model.pth",
-                bottom_model_path: str = "D:/kkokkaot/models/bottom/best_model.pth",
-                outer_model_path: str = "D:/kkokkaot/models/outer/best_model.pth",
-                dress_model_path: str = "D:/kkokkaot/models/dress/best_model.pth",
-                schema_path: str = "D:/kkokkaot/API/kfashion_attributes_schema.csv",
+                top_model_path: str = "/app/pre_trained_weights/top_best_model.pth",
+                bottom_model_path: str = "/app/pre_trained_weights/bottom_best_model.pth",
+                outer_model_path: str = "/app/pre_trained_weights/outer_best_model.pth",
+                dress_model_path: str = "/app/pre_trained_weights/dress_best_model.pth",
+                schema_path: str = "/app/kfashion_attributes_schema.csv",
                 yolo_pose_path: str = None,  # 기존 호환성을 위해 유지
-                chroma_path: str = "./chroma_db",
+                chroma_path: str = "/app/chroma_db",
                 db_config: dict = None):
         """초기화"""
         
@@ -112,15 +112,34 @@ class FashionPipeline:
         # 9. PostgreSQL
         print("9. PostgreSQL 연결...")
         if db_config is None:
+            # AWS RDS 사용 시 환경변수에서 읽기
+            import os
             db_config = {
-                'host': 'localhost',
-                'port': 5432,
-                'database': 'kkokkaot_closet',
-                'user': 'postgres',
-                'password': '000000'
+                'host': os.getenv('DB_HOST', 'localhost'),
+                'port': int(os.getenv('DB_PORT', 5432)),
+                'database': os.getenv('DB_NAME', 'kkokkaot_closet'),
+                'user': os.getenv('DB_USER', 'postgres'),
+                'password': os.getenv('DB_PASSWORD', '000000')
             }
         self.db_config = db_config
         self.db_conn = psycopg2.connect(**db_config)
+        
+        # 읽기 전용 계정 설정
+        db_config_readonly = {
+            'host': os.getenv('DB_HOST', 'localhost'),
+            'port': int(os.getenv('DB_PORT', 5432)),
+            'database': os.getenv('DB_NAME', 'kkokkaot_closet'),
+            'user': 'readonly_user',
+            'password': os.getenv('READONLY_DB_PASSWORD', '000000')
+        }
+        
+        # 읽기 전용 연결
+        try:
+            self.db_conn_readonly = psycopg2.connect(**db_config_readonly)
+            print("✅ 읽기 전용 DB 연결 완료")
+        except Exception as e:
+            print(f"⚠️ 읽기 전용 DB 연결 실패: {e}")
+            self.db_conn_readonly = None
         
         print("\n✓ 모든 모델 로드 완료\n")
     
@@ -1368,6 +1387,10 @@ class FashionPipeline:
         if self.db_conn:
             self.db_conn.close()
             print("PostgreSQL 연결 종료")
+        
+        if hasattr(self, 'db_conn_readonly') and self.db_conn_readonly:
+            self.db_conn_readonly.close()
+            print("읽기 전용 PostgreSQL 연결 종료")
 
 
 # MultiTaskFashionModel 정의

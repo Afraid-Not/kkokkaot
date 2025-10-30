@@ -29,7 +29,7 @@ import AppHeader from '../common/AppHeader';
 import BottomNavBar from '../common/BottomNavBar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const API_BASE_URL = 'https://loyd-extemporaneous-annalise.ngrok-free.dev';
+const API_BASE_URL = 'http://15.165.88.97:4000';
 const APP_HEADER_HEIGHT = 56;
 const BOTTOM_NAV_HEIGHT = 80;
 
