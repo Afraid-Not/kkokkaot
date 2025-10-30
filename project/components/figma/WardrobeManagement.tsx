@@ -43,7 +43,7 @@ type Item = {
 };
 
 // 🌐 API 주소 (ngrok 주소로 변경하세요)
-const API_BASE_URL = 'https://loyd-extemporaneous-annalise.ngrok-free.dev';
+const API_BASE_URL = 'http://15.165.88.97:4000';
 // const API_BASE_URL = 'http://10.0.2.2:4000';
 export default function WardrobeManagement({
   onBack,

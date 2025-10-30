@@ -46,14 +46,21 @@ async def lifespan(app: FastAPI):
     print("🤖 AI 파이프라인 초기화 중...")
     try:
         pipeline = FashionPipeline(
-            gender_model_path=settings.MODEL_PATHS['gender_model'],
-            style_model_path=settings.MODEL_PATHS['style_model'],
-            yolo_model_path=settings.MODEL_PATHS['yolo_detection'],
-            top_model_path=settings.MODEL_PATHS['top_model'],
-            bottom_model_path=settings.MODEL_PATHS['bottom_model'],
-            outer_model_path=settings.MODEL_PATHS['outer_model'],
-            dress_model_path=settings.MODEL_PATHS['dress_model'],
-            db_config=settings.DB_CONFIG
+            style_model_path="/app/pre_trained_weights/k_fashion_best_model.pth",
+            yolo_detection_path="/app/pre_trained_weights/yolo_best.pt",
+            top_model_path="/app/pre_trained_weights/top_best_model.pth",
+            bottom_model_path="/app/pre_trained_weights/bottom_best_model.pth",
+            outer_model_path="/app/pre_trained_weights/outer_best_model.pth",
+            dress_model_path="/app/pre_trained_weights/dress_best_model.pth",
+            schema_path="/app/kfashion_attributes_schema.csv",
+            chroma_path="/app/chroma_db",
+            db_config={
+                'host': 'postgres',
+                'port': 5432,
+                'database': 'kkokkaot_closet',
+                'user': 'postgres',
+                'password': '000000'
+            }
         )
         print("✅ AI 파이프라인 초기화 완료!\n")
         
