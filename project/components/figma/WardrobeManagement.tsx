@@ -227,12 +227,27 @@ export default function WardrobeManagement({
         const userStr = await AsyncStorage.getItem('@kko/user');
         if (userStr) {
           const user = JSON.parse(userStr);
-          setUserId(user.user_id);
+          console.log('👤 파싱된 사용자 정보:', user);
+          
+          // user_id가 숫자인지 확인하고 설정
+          if (user.user_id && typeof user.user_id === 'number') {
+            setUserId(user.user_id);
+          } else if (user.id && typeof user.id === 'number') {
+            setUserId(user.id);
+          } else if (user.id === 'local-user') {
+            // local-user인 경우 기본값으로 1 사용 (개발용)
+            console.log('⚠️ local-user 감지, 기본값 1 사용');
+            setUserId(1);
+          } else {
+            console.log('❌ 유효한 user_id 없음:', user);
+            Alert.alert('로그인 필요', '로그인이 필요합니다.');
+          }
         } else {
           Alert.alert('로그인 필요', '로그인이 필요합니다.');
         }
       } catch (error) {
         console.error('❌ 사용자 정보 로드 실패:', error);
+        Alert.alert('로그인 필요', '로그인이 필요합니다.');
       }
     };
     

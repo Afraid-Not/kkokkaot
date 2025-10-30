@@ -92,8 +92,19 @@ export default function LLMChatScreen({
         if (userData) {
           const user = JSON.parse(userData);
           console.log('👤 파싱된 사용자 정보:', user);
-          console.log('🆔 사용자 ID:', user.id || user.user_id);
-          setUserId(user.id || user.user_id);
+          
+          // user_id가 숫자인지 확인하고 설정
+          if (user.user_id && typeof user.user_id === 'number') {
+            setUserId(user.user_id);
+          } else if (user.id && typeof user.id === 'number') {
+            setUserId(user.id);
+          } else if (user.id === 'local-user') {
+            // local-user인 경우 기본값으로 1 사용 (개발용)
+            console.log('⚠️ local-user 감지, 기본값 1 사용');
+            setUserId(1);
+          } else {
+            console.log('❌ 유효한 user_id 없음:', user);
+          }
         } else {
           console.log('⚠️ AsyncStorage에 사용자 정보 없음');
         }

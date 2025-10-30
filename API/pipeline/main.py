@@ -24,9 +24,9 @@ class FashionPipeline:
                  style_model_path: str = "D:/kkokkaot/API/pre_trained_weights/k_fashion_final_model_1019.pth",
                  yolo_model_path: str = "D:/kkokkaot/API/pre_trained_weights/yolo_best.pt",
                  top_model_path: str = "D:/kkokkaot/API/pre_trained_weights/top_best_model.pth",
-                 bottom_model_path: str = "D:/kkokkaot/API/pre_trained_weights/bottom_best_model.pth",
-                 outer_model_path: str = "D:/kkokkaot/API/pre_trained_weights/outer_best_model.pth",
-                 dress_model_path: str = "D:/kkokkaot/API/pre_trained_weights/dress_best_model.pth",
+                 bottom_model_path: str = "D:/kkokkaot/API/pre_trained_weights/best_model_bottom.pth",
+                 outer_model_path: str = "D:/kkokkaot/API/pre_trained_weights/best_model_outer.pth",
+                 dress_model_path: str = "D:/kkokkaot/API/pre_trained_weights/best_model_dress.pth",
                  db_config: dict = None):
         """
         파이프라인 초기화
