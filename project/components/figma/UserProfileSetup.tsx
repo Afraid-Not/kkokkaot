@@ -13,6 +13,9 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+// API URL 설정 (환경에 따라 변경)
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://192.168.56.1:4000';
+
 export type UserProfileSetupProps = {
   // 완료 시 이름 등을 넘겨 App에서 인사말에 사용
   onComplete: (data: {
@@ -38,122 +41,122 @@ const STYLE_PREFERENCES = [
   {
     name: '기타',
     description: '다른 카테고리에 속하지 않는 독특한 스타일',
-    image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/etc.jpg',
+    image: `${API_BASE_URL}/api/represent-images/etc.jpg`,
   },
   {
     name: '레트로',
     description: '과거 시대의 감성과 스타일을 재해석한 룩',
-    image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/retro.jpg',
+    image: `${API_BASE_URL}/api/represent-images/retro.jpg`,
   },
   {
     name: '로맨틱',
     description: '사랑스럽고 여성스러운 로맨틱 스타일',
-    image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/romantic.jpg',
+    image: `${API_BASE_URL}/api/represent-images/romantic.jpg`,
   },
   {
     name: '리조트',
     description: '휴양지에서 즐기는 여유롭고 세련된 스타일',
-    image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/resort.jpg',
+    image: `${API_BASE_URL}/api/represent-images/resort.jpg`,
   },
   {
     name: '매니시',
     description: '남성적인 요소를 여성스럽게 소화한 스타일',
-    image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/manish.jpg',
+    image: `${API_BASE_URL}/api/represent-images/manish.jpg`,
   },
   {
     name: '모던',
     description: '현대적이고 세련된 미니멀 스타일',
-    image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/modern.jpg',
+    image: `${API_BASE_URL}/api/represent-images/modern.jpg`,
   },
   {
     name: '밀리터리',
     description: '군복에서 영감을 받은 강인하고 실용적인 스타일',
-    image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/military.jpg',
+    image: `${API_BASE_URL}/api/represent-images/military.jpg`,
   },
   {
     name: '섹시',
     description: '매력적이고 관능적인 스타일',
-    image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/sexy.jpg',
+    image: `${API_BASE_URL}/api/represent-images/sexy.jpg`,
   },
   {
     name: '소피스트케이티드',
     description: '세련되고 지적인 고급스러운 스타일',
-    image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/sophisticated.jpg',
+    image: `${API_BASE_URL}/api/represent-images/sophisticated.jpg`,
   },
   {
     name: '스트리트',
     description: '개성있고 트렌디한 도시 스타일',
-    image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/street.jpg',
+    image: `${API_BASE_URL}/api/represent-images/street.jpg`,
   },
   {
     name: '스포티',
     description: '활동적이고 편안한 스포츠 룩',
-    image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/sporty.jpg',
+    image: `${API_BASE_URL}/api/represent-images/sporty.jpg`,
   },
   {
     name: '아방가르드',
     description: '실험적이고 혁신적인 예술적 스타일',
-    image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/avangard.jpg',
+    image: `${API_BASE_URL}/api/represent-images/avangard.jpg`,
   },
   {
     name: '오리엔탈',
     description: '동양의 전통과 현대가 만나는 스타일',
-    image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/oriental.jpg',
+    image: `${API_BASE_URL}/api/represent-images/oriental.jpg`,
   },
   {
     name: '웨스턴',
     description: '미국 서부의 카우보이 스타일',
-    image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/western.jpg',
+    image: `${API_BASE_URL}/api/represent-images/western.jpg`,
   },
   {
     name: '젠더리스',
     description: '성별을 초월한 중성적이고 자유로운 스타일',
-    image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/genderless.jpg',
+    image: `${API_BASE_URL}/api/represent-images/genderless.jpg`,
   },
   {
     name: '컨트리',
     description: '시골의 자연스럽고 편안한 스타일',
-    image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/country.jpg',
+    image: `${API_BASE_URL}/api/represent-images/country.jpg`,
   },
   {
     name: '클래식',
     description: '우아하고 고급스러운 정통 스타일',
-    image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/classic.jpg',
+    image: `${API_BASE_URL}/api/represent-images/classic.jpg`,
   },
   {
     name: '키치',
     description: '유머러스하고 장식적인 팝 아트 스타일',
-    image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/kitsch.jpg',
+    image: `${API_BASE_URL}/api/represent-images/kitsch.jpg`,
   },
   {
     name: '톰보이',
     description: '남성적인 요소를 자연스럽게 소화한 스타일',
-    image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/tomboy.jpg',
+    image: `${API_BASE_URL}/api/represent-images/tomboy.jpg`,
   },
   {
     name: '펑크',
     description: '반항적이고 독립적인 록 스타일',
-    image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/funk.jpg',
+    image: `${API_BASE_URL}/api/represent-images/funk.jpg`,
   },
   {
     name: '페미닌',
     description: '여성스럽고 우아한 스타일',
-    image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/feminin.jpg',
+    image: `${API_BASE_URL}/api/represent-images/feminin.jpg`,
   },
   {
     name: '프레피',
     description: '단정하고 깔끔한 아이비리그 스타일',
-    image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/preppy.jpg',
+    image: `${API_BASE_URL}/api/represent-images/preppy.jpg`,
   },
   {
     name: '히피',
     description: '자유롭고 예술적인 보헤미안 스타일',
-    image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/hippy.jpg',
+    image: `${API_BASE_URL}/api/represent-images/hippy.jpg`,
   },
   {
     name: '힙합',
     description: '힙합 문화에서 영감을 받은 스트리트 스타일',
-    image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/hiphop.jpg',
+    image: `${API_BASE_URL}/api/represent-images/hiphop.jpg`,
   },
 ];
 

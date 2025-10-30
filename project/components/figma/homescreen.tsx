@@ -24,7 +24,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import BottomNavBar from '../common/BottomNavBar';
 import { MainScreen } from '../../App';
 
-const API_BASE_URL = 'https://loyd-extemporaneous-annalise.ngrok-free.dev';
+// API URL 설정 (환경에 따라 변경)
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://192.168.56.1:4000';
 
 type HomeScreenProps = {
   onNavigate: (step: MainScreen) => void;

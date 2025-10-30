@@ -30,7 +30,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { MainScreen } from '../../App';
 
-const API_BASE_URL = 'http://15.165.88.97:4000';
+// API URL 설정 (환경에 따라 변경)
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://192.168.56.1:4000';
 const APP_HEADER_HEIGHT = 56;
 const BOTTOM_NAV_HEIGHT = 80;
 

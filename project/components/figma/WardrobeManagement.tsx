@@ -42,9 +42,9 @@ type Item = {
   dress_image?: string | null;
 };
 
-// 🌐 API 주소 (ngrok 주소로 변경하세요)
-const API_BASE_URL = 'http://15.165.88.97:4000';
-// const API_BASE_URL = 'http://10.0.2.2:4000';
+// API URL 설정 (환경에 따라 변경)
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://192.168.56.1:4000';
+
 export default function WardrobeManagement({
   onBack,
   onNavigate,

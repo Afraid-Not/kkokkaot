@@ -21,36 +21,38 @@ export type SignupScreenProps = {
   onBackToLogin: () => void;
 };
 
-const STYLE_PREFERENCES = [
-  { name: '기타', image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/etc.jpg' },
-  { name: '레트로', image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/retro.jpg' },
-  { name: '로맨틱', image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/romantic.jpg' },
-  { name: '리조트', image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/resort.jpg' },
-  { name: '매니시', image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/manish.jpg' },
-  { name: '모던', image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/modern.jpg' },
-  { name: '밀리터리', image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/military.jpg' },
-  { name: '섹시', image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/sexy.jpg' },
-  { name: '소피스트케이티드', image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/sophisticated.jpg' },
-  { name: '스트리트', image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/street.jpg' },
-  { name: '스포티', image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/sporty.jpg' },
-  { name: '아방가르드', image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/avangard.jpg' },
-  { name: '오리엔탈', image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/oriental.jpg' },
-  { name: '웨스턴', image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/western.jpg' },
-  { name: '젠더리스', image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/genderless.jpg' },
-  { name: '컨트리', image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/country.jpg' },
-  { name: '클래식', image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/classic.jpg' },
-  { name: '키치', image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/kitsch.jpg' },
-  { name: '톰보이', image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/tomboy.jpg' },
-  { name: '펑크', image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/funk.jpg' },
-  { name: '페미닌', image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/feminin.jpg' },
-  { name: '프레피', image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/preppy.jpg' },
-  { name: '히피', image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/hippy.jpg' },
-  { name: '힙합', image: 'https://loyd-extemporaneous-annalise.ngrok-free.dev/api/represent-images/hiphop.jpg' },
-];
 // API URL 설정 (환경에 따라 변경)
-const API_URL = process.env.REACT_APP_API_URL 
-  ? `${process.env.REACT_APP_API_URL}/api/signup`
-  : 'http://192.168.56.1:4000/api/signup';  // 기본값 (로컬 개발)
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://192.168.56.1:4000';
+
+const STYLE_PREFERENCES = [
+  { name: '기타', image: `${API_BASE_URL}/api/represent-images/etc.jpg` },
+  { name: '레트로', image: `${API_BASE_URL}/api/represent-images/retro.jpg` },
+  { name: '로맨틱', image: `${API_BASE_URL}/api/represent-images/romantic.jpg` },
+  { name: '리조트', image: `${API_BASE_URL}/api/represent-images/resort.jpg` },
+  { name: '매니시', image: `${API_BASE_URL}/api/represent-images/manish.jpg` },
+  { name: '모던', image: `${API_BASE_URL}/api/represent-images/modern.jpg` },
+  { name: '밀리터리', image: `${API_BASE_URL}/api/represent-images/military.jpg` },
+  { name: '섹시', image: `${API_BASE_URL}/api/represent-images/sexy.jpg` },
+  { name: '소피스트케이티드', image: `${API_BASE_URL}/api/represent-images/sophisticated.jpg` },
+  { name: '스트리트', image: `${API_BASE_URL}/api/represent-images/street.jpg` },
+  { name: '스포티', image: `${API_BASE_URL}/api/represent-images/sporty.jpg` },
+  { name: '아방가르드', image: `${API_BASE_URL}/api/represent-images/avangard.jpg` },
+  { name: '오리엔탈', image: `${API_BASE_URL}/api/represent-images/oriental.jpg` },
+  { name: '웨스턴', image: `${API_BASE_URL}/api/represent-images/western.jpg` },
+  { name: '젠더리스', image: `${API_BASE_URL}/api/represent-images/genderless.jpg` },
+  { name: '컨트리', image: `${API_BASE_URL}/api/represent-images/country.jpg` },
+  { name: '클래식', image: `${API_BASE_URL}/api/represent-images/classic.jpg` },
+  { name: '키치', image: `${API_BASE_URL}/api/represent-images/kitsch.jpg` },
+  { name: '톰보이', image: `${API_BASE_URL}/api/represent-images/tomboy.jpg` },
+  { name: '펑크', image: `${API_BASE_URL}/api/represent-images/funk.jpg` },
+  { name: '페미닌', image: `${API_BASE_URL}/api/represent-images/feminin.jpg` },
+  { name: '프레피', image: `${API_BASE_URL}/api/represent-images/preppy.jpg` },
+  { name: '히피', image: `${API_BASE_URL}/api/represent-images/hippy.jpg` },
+  { name: '힙합', image: `${API_BASE_URL}/api/represent-images/hiphop.jpg` },
+];
+
+// 회원가입 API URL
+const API_URL = `${API_BASE_URL}/api/signup`;
 
 export default function SignupScreen({ onSignupSuccess, onBackToLogin }: SignupScreenProps) {
   const [step, setStep] = useState(1);
