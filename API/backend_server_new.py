@@ -46,16 +46,16 @@ async def lifespan(app: FastAPI):
     print("🤖 AI 파이프라인 초기화 중...")
     try:
         pipeline = FashionPipeline(
-            style_model_path="/app/pre_trained_weights/k_fashion_best_model.pth",
-            yolo_detection_path="/app/pre_trained_weights/yolo_best.pt",
-            top_model_path="/app/pre_trained_weights/top_best_model.pth",
-            bottom_model_path="/app/pre_trained_weights/bottom_best_model.pth",
-            outer_model_path="/app/pre_trained_weights/outer_best_model.pth",
-            dress_model_path="/app/pre_trained_weights/dress_best_model.pth",
-            schema_path="/app/kfashion_attributes_schema.csv",
-            chroma_path="/app/chroma_db",
+            style_model_path="/home/ubuntu/kkokkaot/API/pre_trained_weights/k_fashion_best_model.pth",
+            yolo_detection_path="/home/ubuntu/kkokkaot/API/pre_trained_weights/yolo_best.pt",
+            top_model_path="/home/ubuntu/kkokkaot/API/pre_trained_weights/top_best_model.pth",
+            bottom_model_path="/home/ubuntu/kkokkaot/API/pre_trained_weights/bottom_best_model.pth",
+            outer_model_path="/home/ubuntu/kkokkaot/API/pre_trained_weights/outer_best_model.pth",
+            dress_model_path="/home/ubuntu/kkokkaot/API/pre_trained_weights/dress_best_model.pth",
+            schema_path="/home/ubuntu/kkokkaot/API/kfashion_attributes_schema.csv",
+            chroma_path="/home/ubuntu/kkokkaot/API/chroma_db",
             db_config={
-                'host': 'postgres',
+                'host': 'localhost',
                 'port': 5432,
                 'database': 'kkokkaot_closet',
                 'user': 'postgres',
@@ -79,7 +79,13 @@ async def lifespan(app: FastAPI):
     # 2. LLM 추천 시스템 초기화
     print("💬 LLM 추천 시스템 초기화 중...")
     try:
-        llm_recommender = LLMRecommender(db_config=settings.DB_CONFIG)
+        llm_recommender = LLMRecommender(db_config={
+            'host': 'localhost',
+            'port': 5432,
+            'database': 'kkokkaot_closet',
+            'user': 'postgres',
+            'password': '000000'
+        })
         print("✅ LLM 추천 시스템 초기화 완료!\n")
         chat.llm_recommender = llm_recommender
     except Exception as e:
