@@ -6,15 +6,8 @@ from pydantic import BaseModel
 import bcrypt
 import psycopg2
 import json
-from models.schemas import SignupRequest, UserResponse
 
 router = APIRouter(prefix="/api", tags=["인증"])
-
-
-class LoginRequest(BaseModel):
-    """로그인 요청 모델"""
-    email: str
-    password: str
 
 # 전역 변수 (메인에서 주입)
 pipeline = None
@@ -28,17 +21,31 @@ def get_pipeline():
 
 
 @router.post("/signup")
-def signup(request: SignupRequest):
+def signup(
+    name: str = Form(...),
+    email: str = Form(...),
+    password: str = Form(...),
+    ageGroup: int = Form(20),
+    stylePreferences: str = Form("[]")
+):
     """
     회원가입 API
     - 이메일 중복 체크
     - 비밀번호 해싱
     - 스타일 선호도 저장
     """
+    # stylePreferences는 JSON 문자열로 전송되므로 파싱
+    import json
+    try:
+        style_prefs = json.loads(stylePreferences) if isinstance(stylePreferences, str) else stylePreferences
+    except:
+        style_prefs = []
+    
     print(f"\n{'='*60}")
     print(f"📝 회원가입 요청")
-    print(f"  - 이름: {request.name}")
-    print(f"  - 이메일: {request.email}")
+    print(f"  - 이름: {name}")
+    print(f"  - 이메일: {email}")
+    print(f"  - 스타일: {style_prefs}")
     print(f"{'='*60}")
     
     if not pipeline:
@@ -50,7 +57,7 @@ def signup(request: SignupRequest):
     try:
         # 1. 비밀번호 해싱
         hashed_password = bcrypt.hashpw(
-            request.password.encode('utf-8'), 
+            password.encode('utf-8'), 
             bcrypt.gensalt()
         ).decode('utf-8')
         
@@ -62,7 +69,7 @@ def signup(request: SignupRequest):
                 INSERT INTO users (username, email, password_hash, style_preferences)
                 VALUES (%s, %s, %s, %s)
                 RETURNING user_id, username, email
-            """, (request.name, request.email, hashed_password, json.dumps(request.stylePreferences)))
+            """, (name, email, hashed_password, json.dumps(style_prefs)))
             
             result = cur.fetchone()
             pipeline.db.conn.commit()
@@ -70,7 +77,7 @@ def signup(request: SignupRequest):
             user_id, username, email = result
             
         print(f"✅ 회원가입 성공! (user_id: {user_id})")
-        print(f"🎨 선택된 스타일: {request.stylePreferences}")
+        print(f"🎨 선택된 스타일: {style_prefs}")
         print(f"{'='*60}\n")
         
         return {
