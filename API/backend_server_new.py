@@ -47,13 +47,11 @@ async def lifespan(app: FastAPI):
     try:
         pipeline = FashionPipeline(
             style_model_path="/home/ubuntu/kkokkaot/API/pre_trained_weights/k_fashion_best_model.pth",
-            yolo_detection_path="/home/ubuntu/kkokkaot/API/pre_trained_weights/yolo_best.pt",
+            yolo_model_path="/home/ubuntu/kkokkaot/API/pre_trained_weights/yolo_best.pt",
             top_model_path="/home/ubuntu/kkokkaot/API/pre_trained_weights/top_best_model.pth",
             bottom_model_path="/home/ubuntu/kkokkaot/API/pre_trained_weights/bottom_best_model.pth",
             outer_model_path="/home/ubuntu/kkokkaot/API/pre_trained_weights/outer_best_model.pth",
             dress_model_path="/home/ubuntu/kkokkaot/API/pre_trained_weights/dress_best_model.pth",
-            schema_path="/home/ubuntu/kkokkaot/API/kfashion_attributes_schema.csv",
-            chroma_path="/home/ubuntu/kkokkaot/API/chroma_db",
             db_config={
                 'host': 'localhost',
                 'port': 5432,
