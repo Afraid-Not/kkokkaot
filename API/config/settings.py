@@ -53,7 +53,7 @@ WEATHER_API_KEY = os.getenv('OPENWEATHER_API_KEY', '')
 WEATHER_API_URL = "http://api.openweathermap.org/data/2.5/weather"
 
 # 서버 설정
-SERVER_HOST = "127.0.0.1"
-SERVER_PORT = 4000
-DEBUG = False
+SERVER_HOST = os.getenv('SERVER_HOST', '0.0.0.0')  # 0.0.0.0으로 변경 (모든 네트워크 인터페이스에서 접근 가능)
+SERVER_PORT = int(os.getenv('SERVER_PORT', 4000))
+DEBUG = os.getenv('DEBUG', 'False').lower() == 'true'
 

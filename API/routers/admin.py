@@ -1,209 +1,245 @@
 """
 관리자 API
-- 기본 아이템 관리
-- 데이터베이스 유지보수
+- 통계 조회
+- 사용자 관리
+- 시스템 모니터링
 """
 from fastapi import APIRouter, HTTPException
-from pathlib import Path
+from typing import Optional
 
-router = APIRouter(prefix="/api", tags=["관리자"])
+router = APIRouter(prefix="/api/admin", tags=["관리자"])
 
 # 전역 변수 (메인에서 주입)
 pipeline = None
 
 
-def process_default_items_internal():
-    """기본 아이템들을 AI 파이프라인으로 처리"""
-    print("\n🎯 기본 아이템 AI 분석 시작...")
+@router.get("/stats")
+async def get_system_stats():
+    """시스템 전체 통계 조회"""
+    print(f"\n{'='*60}")
+    print(f"📊 시스템 통계 조회")
+    print(f"{'='*60}")
     
-    # 기본 아이템 이미지 폴더 경로
-    default_items_dir = Path("./default_items")
+    if not pipeline:
+        raise HTTPException(status_code=503, detail="서버 초기화 실패")
     
-    if not default_items_dir.exists():
-        print("❌ default_items 폴더가 없습니다.")
-        print("💡 default_items 폴더를 생성하고 이미지를 넣어주세요.")
-        return 0
-    
-    # 기본 아이템 이미지 파일들 찾기
-    image_files = []
-    for ext in ['*.jpg', '*.jpeg', '*.png']:
-        image_files.extend(default_items_dir.glob(ext))
-    
-    if not image_files:
-        print("❌ 기본 아이템 이미지가 없습니다.")
-        print("💡 default_items 폴더에 이미지 파일을 넣어주세요.")
-        return 0
-    
-    print(f"📁 {len(image_files)}개의 기본 아이템 이미지 발견")
-    
-    # 기존 기본 아이템 데이터 완전 삭제
     try:
         with pipeline.db.conn.cursor() as cur:
-            print("🗑️ 기존 기본 아이템 데이터 완전 삭제 중...")
+            # 전체 사용자 수
+            cur.execute("SELECT COUNT(*) FROM users")
+            total_users = cur.fetchone()[0]
             
-            # 1. 기본 아이템 속성 테이블들 먼저 삭제
-            cur.execute("DELETE FROM top_attributes_new WHERE item_id IN (SELECT item_id FROM wardrobe_items WHERE is_default = TRUE)")
-            cur.execute("DELETE FROM bottom_attributes_new WHERE item_id IN (SELECT item_id FROM wardrobe_items WHERE is_default = TRUE)")
-            cur.execute("DELETE FROM outer_attributes_new WHERE item_id IN (SELECT item_id FROM wardrobe_items WHERE is_default = TRUE)")
-            cur.execute("DELETE FROM dress_attributes_new WHERE item_id IN (SELECT item_id FROM wardrobe_items WHERE is_default = TRUE)")
+            # 전체 아이템 수
+            cur.execute("SELECT COUNT(*) FROM wardrobe_items WHERE is_default = FALSE")
+            total_items = cur.fetchone()[0]
             
-            # 2. 기본 아이템 메인 테이블 삭제
-            cur.execute("DELETE FROM wardrobe_items WHERE is_default = TRUE")
-            
-            # 3. ChromaDB에서도 삭제
-            try:
-                # 기본 아이템들의 ChromaDB ID 패턴: item_XXX (user_id=0)
-                cur.execute("SELECT chroma_embedding_id FROM wardrobe_items WHERE user_id = 0")
-                chroma_ids = cur.fetchall()
-                for (chroma_id,) in chroma_ids:
-                    if chroma_id:
-                        try:
-                            pipeline.chroma_collection.delete(ids=[chroma_id])
-                        except:
-                            pass
-            except:
-                pass
-            
-            pipeline.db.conn.commit()
-            print("✅ 기존 기본 아이템 데이터 완전 삭제 완료")
-            
-    except Exception as e:
-        print(f"⚠️ 기존 데이터 삭제 중 오류: {e}")
-        pipeline.db.conn.rollback()
-    
-    # 각 이미지에 대해 AI 분석 수행
-    processed_count = 0
-    for image_file in image_files:
-        try:
-            print(f"\n📸 기본 아이템 분석: {image_file.name}")
-            
-            # AI 파이프라인으로 분석
-            result = pipeline.process_image(
-                str(image_file), 
-                user_id=0,  # 기본 아이템은 user_id=0
-                save_separated_images=True
-            )
-            
-            if result['success']:
-                # 기본 아이템으로 마킹
-                with pipeline.db.conn.cursor() as cur:
-                    cur.execute("""
-                        UPDATE wardrobe_items 
-                        SET is_default = TRUE 
-                        WHERE item_id = %s
-                    """, (result['item_id'],))
-                    pipeline.db.conn.commit()
-                
-                processed_count += 1
-                print(f"✅ 기본 아이템 분석 완료: {image_file.name} (ID: {result['item_id']})")
-            else:
-                print(f"❌ 기본 아이템 분석 실패: {image_file.name} - {result.get('error', 'Unknown error')}")
-                
-        except Exception as e:
-            print(f"❌ 기본 아이템 처리 중 오류: {image_file.name} - {e}")
-            continue
-    
-    print(f"\n🎉 기본 아이템 AI 분석 완료: {processed_count}/{len(image_files)}개 성공")
-    return processed_count
-
-
-@router.delete("/default-items")
-def delete_all_default_items():
-    """모든 기본 아이템 삭제 API"""
-    try:
-        if not pipeline:
-            raise HTTPException(status_code=503, detail="AI 파이프라인이 비활성화되어 있습니다.")
-        
-        with pipeline.db.conn.cursor() as cur:
-            # 삭제할 아이템 수 확인
+            # 기본 아이템 수
             cur.execute("SELECT COUNT(*) FROM wardrobe_items WHERE is_default = TRUE")
-            count = cur.fetchone()[0]
+            default_items = cur.fetchone()[0]
             
-            if count == 0:
-                return {
-                    "success": True,
-                    "message": "삭제할 기본 아이템이 없습니다.",
-                    "deleted_count": 0
-                }
-            
-            # 기본 아이템 속성 테이블들 먼저 삭제
-            cur.execute("DELETE FROM top_attributes_new WHERE item_id IN (SELECT item_id FROM wardrobe_items WHERE is_default = TRUE)")
-            cur.execute("DELETE FROM bottom_attributes_new WHERE item_id IN (SELECT item_id FROM wardrobe_items WHERE is_default = TRUE)")
-            cur.execute("DELETE FROM outer_attributes_new WHERE item_id IN (SELECT item_id FROM wardrobe_items WHERE is_default = TRUE)")
-            cur.execute("DELETE FROM dress_attributes_new WHERE item_id IN (SELECT item_id FROM wardrobe_items WHERE is_default = TRUE)")
-            
-            # 기본 아이템 메인 테이블 삭제
-            cur.execute("DELETE FROM wardrobe_items WHERE is_default = TRUE")
-            
-            pipeline.db.conn.commit()
-            
-        return {
-            "success": True,
-            "message": f"기본 아이템 {count}개 삭제 완료",
-            "deleted_count": count
-        }
-    except Exception as e:
-        print(f"❌ 기본 아이템 삭제 API 오류: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"기본 아이템 삭제 오류: {str(e)}"
-        )
-
-
-@router.post("/process-default-items")
-def process_default_items_api():
-    """기본 아이템 AI 분석 API (수동 실행)"""
-    try:
-        if not pipeline:
-            raise HTTPException(status_code=503, detail="AI 파이프라인이 비활성화되어 있습니다.")
-        
-        processed_count = process_default_items_internal()
-        
-        return {
-            "success": True,
-            "message": f"기본 아이템 AI 분석 완료: {processed_count}개 처리됨",
-            "processed_count": processed_count
-        }
-    except Exception as e:
-        print(f"❌ 기본 아이템 처리 API 오류: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"기본 아이템 처리 오류: {str(e)}"
-        )
-
-
-@router.post("/fix-default-items-images")
-def fix_default_items_images():
-    """기본 아이템 이미지 경로 수정 API"""
-    try:
-        if not pipeline:
-            raise HTTPException(status_code=503, detail="AI 파이프라인이 비활성화되어 있습니다.")
-        
-        with pipeline.db.conn.cursor() as cur:
-            # 기본 아이템들의 이미지 경로 업데이트
+            # 카테고리별 아이템 수
             cur.execute("""
-                UPDATE wardrobe_items 
-                SET 
-                    saved_full_image = 'processed_images/user_0/full/item_' || item_id || '_full.jpg',
-                    saved_top_image = CASE WHEN has_top THEN 'processed_images/user_0/top/item_' || item_id || '_top.jpg' ELSE NULL END,
-                    saved_bottom_image = CASE WHEN has_bottom THEN 'processed_images/user_0/bottom/item_' || item_id || '_bottom.jpg' ELSE NULL END,
-                    saved_outer_image = CASE WHEN has_outer THEN 'processed_images/user_0/outer/item_' || item_id || '_outer.jpg' ELSE NULL END,
-                    saved_dress_image = CASE WHEN has_dress THEN 'processed_images/user_0/dress/item_' || item_id || '_dress.jpg' ELSE NULL END
-                WHERE is_default = TRUE
+                SELECT 
+                    COUNT(CASE WHEN has_top THEN 1 END) as tops,
+                    COUNT(CASE WHEN has_bottom THEN 1 END) as bottoms,
+                    COUNT(CASE WHEN has_outer THEN 1 END) as outers,
+                    COUNT(CASE WHEN has_dress THEN 1 END) as dresses
+                FROM wardrobe_items
+                WHERE is_default = FALSE
             """)
+            categories = cur.fetchone()
             
-            updated_count = cur.rowcount
-            pipeline.db.conn.commit()
+            # 최근 가입 사용자 (5명)
+            cur.execute("""
+                SELECT user_id, username, email, created_at
+                FROM users
+                ORDER BY created_at DESC
+                LIMIT 5
+            """)
+            recent_users = cur.fetchall()
             
+            # 최근 업로드 아이템 (10개)
+            cur.execute("""
+                SELECT 
+                    w.item_id,
+                    w.user_id,
+                    u.username,
+                    w.created_at,
+                    w.gender,
+                    w.style
+                FROM wardrobe_items w
+                JOIN users u ON w.user_id = u.user_id
+                WHERE w.is_default = FALSE
+                ORDER BY w.created_at DESC
+                LIMIT 10
+            """)
+            recent_items = cur.fetchall()
+        
+        print(f"  ✅ 총 사용자: {total_users}명")
+        print(f"  ✅ 총 아이템: {total_items}개")
+        print(f"{'='*60}\n")
+        
         return {
             "success": True,
-            "message": f"기본 아이템 이미지 경로 {updated_count}개 수정 완료",
-            "updated_count": updated_count
+            "stats": {
+                "total_users": total_users,
+                "total_items": total_items,
+                "default_items": default_items,
+                "categories": {
+                    "tops": categories[0],
+                    "bottoms": categories[1],
+                    "outers": categories[2],
+                    "dresses": categories[3]
+                }
+            },
+            "recent_users": [
+                {
+                    "user_id": row[0],
+                    "username": row[1],
+                    "email": row[2],
+                    "created_at": str(row[3])
+                }
+                for row in recent_users
+            ],
+            "recent_items": [
+                {
+                    "item_id": row[0],
+                    "user_id": row[1],
+                    "username": row[2],
+                    "created_at": str(row[3]),
+                    "gender": row[4],
+                    "style": row[5]
+                }
+                for row in recent_items
+            ]
         }
+        
     except Exception as e:
-        print(f"❌ 이미지 경로 수정 API 오류: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"이미지 경로 수정 오류: {str(e)}"
-        )
+        print(f"❌ 통계 조회 오류: {e}")
+        print(f"{'='*60}\n")
+        raise HTTPException(status_code=500, detail=str(e))
 
+
+@router.get("/users")
+async def get_all_users(limit: int = 50, offset: int = 0):
+    """모든 사용자 조회"""
+    print(f"\n👥 사용자 목록 조회 (limit={limit}, offset={offset})")
+    
+    if not pipeline:
+        raise HTTPException(status_code=503, detail="서버 초기화 실패")
+    
+    try:
+        with pipeline.db.conn.cursor() as cur:
+            # 전체 사용자 수
+            cur.execute("SELECT COUNT(*) FROM users")
+            total = cur.fetchone()[0]
+            
+            # 페이징된 사용자 목록
+            cur.execute("""
+                SELECT 
+                    u.user_id,
+                    u.username,
+                    u.email,
+                    u.created_at,
+                    COUNT(w.item_id) as item_count
+                FROM users u
+                LEFT JOIN wardrobe_items w ON u.user_id = w.user_id
+                GROUP BY u.user_id, u.username, u.email, u.created_at
+                ORDER BY u.created_at DESC
+                LIMIT %s OFFSET %s
+            """, (limit, offset))
+            
+            users = cur.fetchall()
+        
+        return {
+            "success": True,
+            "total": total,
+            "users": [
+                {
+                    "user_id": row[0],
+                    "username": row[1],
+                    "email": row[2],
+                    "created_at": str(row[3]),
+                    "item_count": row[4]
+                }
+                for row in users
+            ]
+        }
+        
+    except Exception as e:
+        print(f"❌ 사용자 목록 조회 오류: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/users/{user_id}")
+async def delete_user(user_id: int):
+    """사용자 삭제 (관리자 전용)"""
+    print(f"\n🗑️ 사용자 삭제 요청 (user_id: {user_id})")
+    
+    if not pipeline:
+        raise HTTPException(status_code=503, detail="서버 초기화 실패")
+    
+    try:
+        with pipeline.db.conn.cursor() as cur:
+            # 사용자 존재 확인
+            cur.execute("SELECT username FROM users WHERE user_id = %s", (user_id,))
+            user = cur.fetchone()
+            
+            if not user:
+                raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다")
+            
+            username = user[0]
+            
+            # CASCADE로 관련 데이터 자동 삭제됨
+            cur.execute("DELETE FROM users WHERE user_id = %s", (user_id,))
+            pipeline.db.conn.commit()
+        
+        print(f"  ✅ 사용자 삭제 완료: {username} (ID: {user_id})")
+        
+        return {
+            "success": True,
+            "message": f"사용자 '{username}'이(가) 삭제되었습니다."
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        pipeline.db.conn.rollback()
+        print(f"❌ 사용자 삭제 오류: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/health")
+async def health_check():
+    """서버 상태 체크"""
+    
+    status = {
+        "server": "running",
+        "pipeline": "inactive",
+        "database": "disconnected"
+    }
+    
+    # 파이프라인 상태 체크
+    if pipeline:
+        status["pipeline"] = "active"
+        
+        # 데이터베이스 연결 체크
+        try:
+            with pipeline.db.conn.cursor() as cur:
+                cur.execute("SELECT 1")
+                cur.fetchone()
+            status["database"] = "connected"
+        except:
+            status["database"] = "error"
+    
+    all_healthy = (
+        status["server"] == "running" and
+        status["pipeline"] == "active" and
+        status["database"] == "connected"
+    )
+    
+    return {
+        "success": all_healthy,
+        "status": status,
+        "message": "모든 시스템 정상" if all_healthy else "일부 시스템 비정상"
+    }
