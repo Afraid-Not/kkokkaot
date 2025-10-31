@@ -1,9 +1,7 @@
 // 꼬까옷 API 클라이언트
 import axios, { AxiosError } from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-
-// API URL (환경변수 또는 기본값)
-const API_URL = process.env.REACT_APP_API_URL || 'http://192.168.56.1:4000';
+import { API_URL } from './config';
 
 console.log('🌐 API URL:', API_URL);
 

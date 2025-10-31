@@ -8,9 +8,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { ChevronLeft } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-
-// API URL 설정 (환경에 따라 변경)
-const API_BASE = process.env.REACT_APP_API_URL || 'http://192.168.56.1:4000';
+import { API_URL as API_BASE } from '../../lib/config';
 
 type RawUser = {
   user_id?: number | string;

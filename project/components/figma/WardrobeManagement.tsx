@@ -20,6 +20,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import AppHeader from '../common/AppHeader';
 import BottomNavBar from '../common/BottomNavBar';
 import { MainScreen } from '../../App';
+import { API_URL as API_BASE_URL } from '../../lib/config';
 
 type ViewMode = 'grid' | 'list';
 type Item = { 
@@ -41,9 +42,6 @@ type Item = {
   outer_image?: string | null;
   dress_image?: string | null;
 };
-
-// API URL 설정 (환경에 따라 변경)
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://192.168.56.1:4000';
 
 export default function WardrobeManagement({
   onBack,

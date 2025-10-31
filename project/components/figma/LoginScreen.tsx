@@ -11,6 +11,7 @@ import {
   ImageBackground 
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { API_URL as API_BASE_URL } from '../../lib/config';
 
 export type LoginScreenProps = {
   onLoginSuccess: (name: string) => void;
@@ -21,9 +22,6 @@ export type LoginScreenProps = {
 // 정규식 정의
 const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
 const PASSWORD_REGEX = /^(?=.*[a-zA-Z])(?=.*[0-9])(?=.*[!@#$%^&*()_+])[a-zA-Z0-9!@#$%^&*()_+]{8,20}$/;
-
-// API URL 설정 (환경에 따라 변경)
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://192.168.56.1:4000';
 
 export default function LoginScreen({
   onLoginSuccess,

@@ -15,14 +15,12 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ArrowLeft } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage'; // ✅ 추가
+import { API_URL as API_BASE_URL } from '../../lib/config';
 
 export type SignupScreenProps = {
   onSignupSuccess: (data: { name: string }) => void;
   onBackToLogin: () => void;
 };
-
-// API URL 설정 (환경에 따라 변경)
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://192.168.56.1:4000';
 
 const STYLE_PREFERENCES = [
   { name: '기타', image: `${API_BASE_URL}/api/represent-images/etc.jpg` },
