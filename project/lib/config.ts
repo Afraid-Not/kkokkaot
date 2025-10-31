@@ -7,7 +7,7 @@
 export const API_URL = 
   process.env.REACT_APP_API_URL || 
   process.env.EXPO_PUBLIC_API_URL || 
-  'http://192.168.56.1:4000';
+  'http://15.165.88.97:4000';  // AWS 서버
 
 // 이미지 URL 생성 헬퍼
 export const getImageUrl = (path: string) => {
