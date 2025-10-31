@@ -5,14 +5,14 @@ FROM python:3.9-slim
 WORKDIR /app
 
 # 시스템 패키지 업데이트 및 필요한 패키지 설치
+# libgl1-mesa-glx -> libgl1 (최신 Debian에서 패키지명 변경)
 RUN apt-get update && apt-get install -y \
-    libgl1-mesa-glx \
+    libgl1 \
     libglib2.0-0 \
     libsm6 \
     libxext6 \
     libxrender-dev \
     libgomp1 \
-    libgcc-s1 \
     && rm -rf /var/lib/apt/lists/*
 
 # Python 패키지 설치를 위한 requirements.txt 복사
